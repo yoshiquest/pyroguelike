@@ -1,5 +1,6 @@
 import curses
-from random import randint, sample, shuffle
+import random
+from random import randint, sample, shuffle, seed
 
 LEVEL_WIDTH = 100
 LEVEL_HEIGHT = 100
@@ -10,25 +11,46 @@ MAX_ROOM_WIDTH = 20
 MIN_ROOM_HEIGHT = 5
 MAX_ROOM_HEIGHT = 10
 
-# def saferange(a, b):
-# 	return range(b, a+1) if a > b else range(a, b+1)
+def saferange(a, b):
+	return range(b, a+1) if a > b else range(a, b+1)
+def minmax(coll):
+	return (min(coll), max(coll))
+class HallwaySegment:
+	def __init__(self, y1, x1, y2, x2):
+		self.y1 = y1
+		self.x1 = x1
+		self.y2 = y2
+		self.x2 = x2
+	def draw(self, window):
+		for y in saferange(self.y1, self.y2):
+			for x in saferange(self.x1, self.x2):
+				window.addch(y, x, curses.ACS_CKBOARD)
+	@property
+	def xmin(self):
+		return self.x1 if self.x1 < self.x2 else self.x2
+	@property
+	def xmax(self):
+		return self.x2 if self.x1 < self.x2 else self.x1
+	@property
+	def ymin(self):
+		return self.y1 if self.y1 < self.y2 else self.y2
+	@property
+	def ymax(self):
+		return self.y2 if self.y1 < self.y2 else self.y1
+	def __repr__(self):
+		return f"({self.y1}, {self.x1}) <-> ({self.y2}, {self.x2})"
+	def __contains__(self, element):
+		if(isinstance(element, tuple)):
+			if(len(element) == 2):
+				y,x = element
+				return (y in saferange(self.y1, self.y2)) and (x in saferange(self.x1, self.x2))
+		return False
 
-# class HallwaySegment:
-# 	def __init__(self, y1, x1, y2, x2):
-# 		self.y1 = y1
-# 		self.x1 = x1
-# 		self.y2 = y2
-# 		self.x2 = x2
-# 	def draw(self, window):
-# 		for y in saferange(self.y1, self.y2):
-# 			for x in saferange(self.x1, self.x2):
-# 				window.addch(y, x, curses.ACS_CKBOARD)
-# 	def __contains__(self, element):
-# 		if(isinstance(element, tuple)):
-# 			if(len(element) == 2):
-# 				y,x = element
-# 				return (y in saferange(self.y1, self.y2)) and (x in saferange(self.x1, self.x2))
-# 		return False
+def swapxy(t):
+	if(len(t) == 4):
+		return t[1::-1] + t[:1:-1]
+	else:
+		return t[::-1]
 
 #TODO:
 #Generate level by creating 3-6(?) randomly sized an located rooms. Delete overlapping rooms, and create hallways to connect them.
@@ -39,100 +61,49 @@ class Hallway:
 	def __init__(self, room1, room2):
 		self.room1 = room1
 		self.room2 = room2
-		self.door1 = None
-		self.door2 = None
-		self.horizontal = (room1.xwidth + 1 < room2.x or room2.xwidth + 1 < room1.x)
-		vertical = (room1.yheight + 1 < room2.y or room2.yheight + 1 < room1.y)
-		if self.horizontal and vertical:
+		horizontal = (self.room1.xwidth + 1 < self.room2.x or self.room2.xwidth + 1 < self.room1.x)
+		vertical = (self.room1.yheight + 1 < self.room2.y or self.room2.yheight + 1 < self.room1.y)
+		if horizontal and vertical:
 			if(randint(0,1) == 0):
-				self.horizontal = False
-		if self.horizontal:
-			if(room1.xwidth < room2.x):
-				#Room1 is left of Room2, put door on right of room1, left of room2
-				self.door1 = (randint(room1.y+1, room1.yheight-1), room1.xwidth)
-				self.door2 = (randint(room2.y+1, room2.yheight-1), room2.x)
-				self.midpoint = randint(room1.xwidth+1, room2.x-1)
-				while(self.door1 in room1.hallwaydoors):
-					self.door1 = (randint(room1.y+1, room1.yheight-1), room1.xwidth)
-				while(self.door2 in room2.hallwaydoors):
-					self.door2 = (randint(room2.y+1, room2.yheight-1), room2.x)
-			else:
-				self.door1 = (randint(room1.y+1, room1.yheight-1), room1.x)
-				self.door2 = (randint(room2.y+1, room2.yheight-1), room2.xwidth)
-				self.midpoint = randint(room2.xwidth+1, room1.x-1)
-				while(self.door1 in room1.hallwaydoors):
-					self.door1 = (randint(room1.y+1, room1.yheight-1), room1.x)
-				while(self.door2 in room2.hallwaydoors):
-					self.door2 = (randint(room2.y+1, room2.yheight-1), room2.xwidth)
-		elif vertical:
-			if(room1.yheight < room2.y):
-				self.door1 = (room1.yheight, randint(room1.x+1, room1.xwidth-1))
-				self.door2 = (room2.y, randint(room2.x+1, room2.xwidth-1))
-				self.midpoint = randint(room1.yheight+1, room2.y-1)
-				while(self.door1 in room1.hallwaydoors):
-					self.door1 = (room1.yheight, randint(room1.x+1, room1.xwidth-1))
-				while(self.door2 in room2.hallwaydoors):
-					self.door2 = (room2.y, randint(room2.x+1, room2.xwidth-1))
-			else:
-				self.door1 = (room1.y, randint(room1.x+1, room1.xwidth-1))
-				self.door2 = (room2.yheight, randint(room2.x+1, room2.xwidth-1))
-				self.midpoint = randint(room2.yheight+1, room1.y-1)
-				while(self.door1 in room1.hallwaydoors):
-					self.door1 = (room1.y, randint(room1.x+1, room1.xwidth-1))
-				while(self.door2 in room2.hallwaydoors):
-					self.door2 = (room2.yheight, randint(room2.x+1, room2.xwidth-1))
-		else:
-			raise Exception(f"Error! {room1} and {room2} overlap.")
-		room1.hallwaydoors[self.door1] = self
-		room2.hallwaydoors[self.door2] = self
-		self.leftdoor,self.rightdoor = (self.door1,self.door2) if self.door1[1] < self.door2[1] else (self.door2,self.door1)
-		self.topdoor,self.bottomdoor = (self.door1,self.door2) if self.door1[0] < self.door2[0] else (self.door2,self.door1)
-	# @property
-	# def leftdoor(self):
-	# 	return self.door1 if self.door1[1] < self.door2[1] else self.door2
-	# @property
-	# def rightdoor(self):
-	# 	return self.door2 if self.door1[1] < self.door2[1] else self.door1
-	# @property
-	# def topdoor(self):
-	# 	return self.door1 if self.door1[0] < self.door2[0] else self.door2
-	# @property
-	# def bottomdoor(self):
-	# 	return self.door2 if self.door1[0] < self.door2[0] else self.door1
+				vertical = False
+		if not (horizontal or vertical):
+			raise Exception(f"Error! {self.room1} and {self.room2} overlap.")
+		t1,t2 = (self.room1.tuple(),self.room2.tuple())
+		if vertical:
+			t1,t2 = (swapxy(t1), swapxy(t2))
+		if(t1[3] > t2[1]):
+			self.room1, self.room2 = (self.room2, self.room1)
+			t1, t2 = (t2, t1)
+		door1 = (randint(t1[0]+1, t1[2]-1), t1[3])
+		door2 = (randint(t2[0]+1, t2[2]-1), t2[1])
+		while (door1[::-1] if vertical else door1) in self.room1.hallwaydoors or (door2[::-1] if vertical else door2) in self.room2.hallwaydoors:
+			door1 = (randint(t1[0]+1, t1[2]-1), t1[3])
+			door2 = (randint(t2[0]+1, t2[2]-1), t2[1])
+		midpoint = randint(t1[3]+1, t2[1]-1)
+		point1 = (door1[0], door1[1] + 1)
+		point2 = (door2[0], door2[1] - 1)
+		pointm1 = (door1[0], midpoint)
+		pointm2 = (door2[0], midpoint)
+		if vertical:
+			door1,door2,point1,point2,pointm1,pointm2 = [x[::-1] for x in (door1, door2, point1, point2, pointm1, pointm2)]
+		self.seg1 = HallwaySegment(point1[0], point1[1], pointm1[0], pointm1[1])
+		self.seg2 = HallwaySegment(pointm2[0], pointm2[1], point2[0], point2[1])
+		self.segmid = HallwaySegment(pointm1[0], pointm1[1], pointm2[0], pointm2[1])
+		self.door1 = door1
+		self.door2 = door2
+		if self.room1 == room2:
+			self.room1, self.room2, self.door1, self.door2 = (self.room2, self.room1, self.door2, self.door1)
+		assert door1 not in self.room1.hallwaydoors and door1 not in self.room2.hallwaydoors and door2 not in self.room1.hallwaydoors and door2 not in self.room2.hallwaydoors
+		self.room1.hallwaydoors[self.door1] = self
+		self.room2.hallwaydoors[self.door2] = self
 	def __repr__(self):
-		return f"H({self.door1},{self.door2},{self.midpoint})"
-	def __contains__(self, tupple):
-		if(len(tupple) == 2):
-			y,x = tupple
-			if(self.horizontal):
-				return (y == self.leftdoor[0] and x < self.midpoint and self.leftdoor[1] < x) \
-					or (y == self.rightdoor[0] and self.midpoint < x and x < self.rightdoor[1]) \
-					or (x == self.midpoint and  y <= self.bottomdoor[0] and self.topdoor[0] <= y)
-			else:
-				return (x == self.topdoor[1] and y < self.midpoint and self.topdoor[0] < y) \
-					or (x == self.bottomdoor[1] and self.midpoint < y and y < self.bottomdoor[0]) \
-					or (y == self.midpoint and x <= self.rightdoor[1] and self.leftdoor[1] <= x)
-		return False
+		return f"H({self.seg1},{self.segmid},{self.seg2})"
+	def __contains__(self, element):
+		return (element in self.seg1 or element in self.seg2 or element in self.segmid)
 	def draw(self, window):
-		if(self.midpoint is not None):
-			if(self.horizontal):
-				#Draw line from first door to mid.
-				# leftdoor,rightdoor = (self.door1,self.door2) if self.door1[1] < self.door2[1] else (self.door2,self.door1)
-				for i in range(self.leftdoor[1]+1, self.midpoint):
-					window.addch(self.leftdoor[0], i, curses.ACS_CKBOARD)
-				for i in range(self.midpoint+1, self.rightdoor[1]):
-					window.addch(self.rightdoor[0], i, curses.ACS_CKBOARD)
-				for i in range(self.topdoor[0], self.bottomdoor[0]+1):
-					window.addch(i, self.midpoint, curses.ACS_CKBOARD)
-			else:
-				# topdoor,bottomdoor = (self.door1,self.door2) if self.door1[0] < self.door2[0] else (self.door2,self.door1)
-				for i in range(self.topdoor[0]+1, self.midpoint):
-					window.addch(i, self.topdoor[1], curses.ACS_CKBOARD)
-				for i in range(self.midpoint+1, self.bottomdoor[0]):
-					window.addch(i, self.bottomdoor[1], curses.ACS_CKBOARD)
-				for i in range(self.leftdoor[1], self.rightdoor[1]+1):
-					window.addch(self.midpoint, i, curses.ACS_CKBOARD)
-
+		self.seg1.draw(window)
+		self.segmid.draw(window)
+		self.seg2.draw(window)
 
 class Room:
 	def __init__(self, y, x, height, width):
@@ -145,12 +116,25 @@ class Room:
 	def yheight(self):
 		return self.y + self.height
 	def __repr__(self):
-		return f"R({self.y}, {self.x}, {self.height}, {self.width})"
-	def tupple(self):
-		return (self.y, self.x, self.height, self.width)
+		return f"R({self.y}, {self.x}, {self.yheight}, {self.xwidth})"
+	def tuple(self):
+		return (self.y, self.x, self.yheight, self.xwidth)
 	def __eq__(self, other):
 		return isinstance(other, Room) and self.x == other.x and self.y == other.y and self.height == other.height and self.width == other.width
+	def __contains__(self, element):
+		if isinstance(element, Hallway):
+			return (element.seg1 in self or element.seg2 in self or element.segmid in self)
+		elif isinstance(element, HallwaySegment):
+			tminy, tminx = (max(element.ymin, self.y), max(element.xmin, self.x))
+			tmaxy, tmaxx = (min(element.ymax, self.yheight), min(element.xmax, self.xwidth))
+			return (not (tminx > tmaxx or tmaxy > tminy))
+		return False
+
 	def draw(self, window):
+		#Clear interior:
+		for y in range(self.y+1, self.yheight):
+			for x in range(self.x+1, self.xwidth):
+				window.addch(y, x, " ")
 		#First we draw the corners:
 		window.addch(self.y, self.x, curses.ACS_ULCORNER)
 		window.addch(self.yheight, self.x, curses.ACS_LLCORNER)
@@ -167,10 +151,7 @@ class Room:
 		#Add the doors:
 		for door in self.hallwaydoors.keys():
 			window.addch(door[0], door[1], "+")
-		#Clear interior:
-		for y in range(self.y+1, self.yheight):
-			for x in range(self.x+1, self.xwidth):
-				window.addch(y, x, " ")
+		# window.addstr(self.y+1, self.x+1, str(self))
 
 class Player:
 	def __init__(self, y, x, start_room):
@@ -228,6 +209,7 @@ class Level:
 	def draw(self, window):
 		for room in self.rooms:
 			room.draw(window)
+
 		for hallway in self.hallways:
 			hallway.draw(window)
 
@@ -235,7 +217,7 @@ def generate_rooms():
 	rooms = []
 	num_rooms = randint(MIN_ROOMS, MAX_ROOMS)
 	current_iter = 0
-	while len(rooms) < num_rooms and current_iter < 100:
+	while len(rooms) < num_rooms:
 		for _ in range(len(rooms), num_rooms):
 			width = randint(MIN_ROOM_WIDTH, MAX_ROOM_WIDTH)
 			height = randint(MIN_ROOM_HEIGHT, MAX_ROOM_HEIGHT)
@@ -246,88 +228,73 @@ def generate_rooms():
 			for room2 in original_rooms:
 				if room1 is not room2 and room1 in rooms and room2 in rooms:
 					if not (room1.y > room2.yheight + 1 or room2.y > room1.yheight + 1 or room1.x > room2.xwidth + 1 or room2.x > room1.xwidth + 1):
-						#The smaller-sized room is removed (upside: bigger rooms are nice, downside: bigger rooms could have more overlaps)
-						# if room2.height + room2.width > room1.height + room1.width:
-						# 	rooms.remove(room1)
-						# else:
-						# 	rooms.remove(room2)
 						if(randint(0,1) == 0):
 							rooms.remove(room1)
 						else:
 							rooms.remove(room2)
 		current_iter+=1
+		if current_iter > 100:
+			rooms = []
+			current_iter = 0
 	return rooms
 
 def check_hallway_intersection(rooms, hallway):
-	#TODO: Needs cleaning up, but works for now.
 	for room in rooms:
 		if(room is not hallway.room1 and room is not hallway.room2):
-			leftdoor,rightdoor = (hallway.door1,hallway.door2) if hallway.door1[1] < hallway.door2[1] else (hallway.door2,hallway.door1)
-			topdoor,bottomdoor = (hallway.door1,hallway.door2) if hallway.door1[0] < hallway.door2[0] else (hallway.door2,hallway.door1)
-			if(hallway.horizontal):
-				if not ((hallway.midpoint < room.x or room.xwidth < leftdoor[1] or leftdoor[0] < room.y or room.yheight < leftdoor[0])
-					    and (room.xwidth < hallway.midpoint or rightdoor[1] < room.x or rightdoor[0] < room.y or room.yheight < rightdoor[0])
-					    and (bottomdoor[0] < room.y or room.yheight < topdoor[0] or room.xwidth < hallway.midpoint or hallway.midpoint < room.x)):
-					return room
-			else:
-				if not ((room.yheight < topdoor[0] or hallway.midpoint < room.y or room.xwidth < topdoor[1] or topdoor[1] < room.x)
-					and (room.yheight < hallway.midpoint or bottomdoor[0] < room.y or bottomdoor[1] < room.x or room.xwidth < bottomdoor[1])
-					and (rightdoor[1] < room.x or room.xwidth < leftdoor[1] or room.yheight < hallway.midpoint or hallway.midpoint < room.y)):
-					return room
+			if hallway in room:
+				return room
 	return False
 
 def generate_hallways(rooms):
-	num_hallways = len(rooms)
 	hallways = []
-	unconnected_rooms = {room.tupple() for room in rooms}
+	unconnected_rooms = {room.tuple() for room in rooms}
 	room1 = sample(list(rooms), 1)[0]
 	room2 = None
-	unconnected_rooms.remove(room1.tupple())
+	unconnected_rooms.remove(room1.tuple())
+	meta_iter = 0
+	num_iter = 0
 	while(len(unconnected_rooms) != 0):
-		room2tuple = sample(list(unconnected_rooms), 1)[0]
-		for room in rooms:
-			if(room.tupple() == room2tuple):
-				room2 = room
+		if(num_iter > 100):
+			meta_iter+=1
+			if meta_iter > 100:
+				return None
+			hallways = []
+			unconnected_rooms = {room.tuple() for room in rooms}
+			room1 = sample(list(rooms), 1)[0]
+			room2 = None
+			unconnected_rooms.remove(room1.tuple())
+			num_iter = 0
+			for room in rooms:
+				room.hallwaydoors = {}
+		if(room2 is None):
+			room2tuple = sample(list(unconnected_rooms), 1)[0]
+			for room in rooms:
+				if(room.tuple() == room2tuple):
+					room2 = room
+			assert room2.tuple() == room2tuple, "room 2 not found"
 		hallway = Hallway(room1, room2)
 		collision = check_hallway_intersection(rooms, hallway)
 		if(collision):
 			del room1.hallwaydoors[hallway.door1]
 			del room2.hallwaydoors[hallway.door2]
-			if(collision.tupple() in unconnected_rooms):
+			if(collision.tuple() in unconnected_rooms):
 				room2 = collision
-			elif(len(unconnected_rooms)==1):
-				room1 = collision
-				room2 = list(unconnected_rooms)[0]
 			else:
-				room2tuple = sample(list(unconnected_rooms), 1)[0]
-				for room in rooms:
-					if(room.tupple() == room2tuple):
-						room2 = room
+				room1 = collision
+				room2 = None
 		else:
 			hallways.append(hallway)
-			unconnected_rooms.remove(room2.tupple())
+			unconnected_rooms.remove(room2.tuple())
 			room1 = room2
 			room2 = None
+		num_iter+=1
 	return hallways
 
-	# for _ in range(num_hallways):
-	# 	hallway = None
-	# 	shuffle(rooms)
-	# 	rooms.sort(key=lambda x: len(x.hallwaydoors))
-	# 	room1,room2 = rooms[:2]
-	# 	hallway = Hallway(room1, room2)
-	# 	collision = check_hallway_intersection(rooms, hallway)
-	# 	if(collision):
-	# 		#Remove the hallway, and try again between the collided room and another room
-	# 		del room1.hallwaydoors[hallway.door1]
-	# 		del room2.hallwaydoors[hallway.door2]
-	# 			# if(randint(0,1) == 0):
-	# 			# 	room1 = collision
-	# 			# else:
-	# 			# 	room2 = collision
-	# 	else:
-	# 		hallways.append(hallway)
-	# return hallways
+def generate_level():
+	rooms = generate_rooms()
+	while((hallways := generate_hallways(rooms)) is None):
+		rooms = generate_rooms()
+	return Level(rooms, hallways)
 
 key_directions = {curses.KEY_UP: (-1, 0),
 				  curses.KEY_DOWN: (1, 0),
@@ -350,13 +317,17 @@ def main(scrwindow):
 	global LEVEL_HEIGHT, LEVEL_WIDTH
 	LEVEL_HEIGHT = curses.LINES-1
 	LEVEL_WIDTH = curses.COLS-2
-	rooms = generate_rooms()
-	hallways = generate_hallways(rooms)
-	start_room = rooms[0]
+	# for room in rooms:
+	# 	room.draw(scrwindow)
+	# scrwindow.refresh()
+	# scrwindow.getch()
+	level = generate_level()
+	start_room = level.rooms[0]
 	player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
-	level = Level(rooms, hallways)
 	level.draw(scrwindow)
 	player.draw(scrwindow)
+	# scrwindow.addstr(0, 0, str(player.location))
+	# scrwindow.addstr(1, 0, str((player.y, player.x)))
 	scrwindow.refresh()
 	while True:
 		do_update = False
@@ -372,7 +343,9 @@ def main(scrwindow):
 			do_update = level.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
 		player.draw(scrwindow)
 		# scrwindow.addstr(0, 0, str(player.location))
-		# scrwindow.addstr(1, 0, str((player.y, player.x)))
+		# scrwindow.addstr(0, 0, str(player.location))
 		scrwindow.refresh()
 
+#seed(1)
+# print(random.getstate())
 curses.wrapper(main)

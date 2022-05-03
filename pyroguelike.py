@@ -3,7 +3,7 @@ import random
 from random import randint, sample, shuffle, seed
 
 LEVEL_WIDTH = 100
-LEVEL_HEIGHT = 100
+LEVEL_HEIGHT = 50
 MIN_ROOMS = 3
 MAX_ROOMS = 8
 MIN_ROOM_WIDTH = 5
@@ -136,10 +136,13 @@ class Room:
 			for x in range(self.x+1, self.xwidth):
 				window.addch(y, x, " ")
 		#First we draw the corners:
-		window.addch(self.y, self.x, curses.ACS_ULCORNER)
-		window.addch(self.yheight, self.x, curses.ACS_LLCORNER)
-		window.addch(self.y, self.xwidth, curses.ACS_URCORNER)
-		window.addch(self.yheight, self.xwidth, curses.ACS_LRCORNER)
+		try:
+			window.addch(self.y, self.x, curses.ACS_ULCORNER)
+			window.addch(self.yheight, self.x, curses.ACS_LLCORNER)
+			window.addch(self.y, self.xwidth, curses.ACS_URCORNER)
+			window.addch(self.yheight, self.xwidth, curses.ACS_LRCORNER)
+		except curses.error as e:
+			raise Exception(str(self))
 		#Draw horizontal lines:
 		for i in range(self.x+1,self.xwidth):
 			window.addch(self.y, i, curses.ACS_HLINE)
@@ -165,51 +168,58 @@ class Level:
 	def __init__(self, rooms, hallways):
 		self.rooms = rooms
 		self.hallways = hallways
+	@property
+	def min_x(self):
+		return min(self.rooms, key=lambda r: r.x).x
+	@property
+	def min_y(self):
+		return min(self.rooms, key=lambda r: r.y).y
+	@property
+	def max_x(self):
+		return max(self.rooms, key=Room.xwidth.fget).xwidth
+	@property
+	def max_y(self):
+		return max(self.rooms, key=Room.yheight.fget).yheight
 	def move(self, entity, new_y, new_x):
 		"Attempts to move entity to new_y, new_x. Returns True if moved successfully, False otherwise."
+		new_coords = (new_y, new_x)
 		if(isinstance(entity.location, Room)):
 			room = entity.location
 			if((new_y < room.yheight and room.y < new_y and new_x < room.xwidth and room.x < new_x) or
-				((new_y, new_x) in room.hallwaydoors)):
-				entity.y = new_y
-				entity.x = new_x
+				(new_coords in room.hallwaydoors)):
+				entity.y, entity.x = new_coords
 				return True
 			elif((entity.y, entity.x) in room.hallwaydoors):
 				hallway = room.hallwaydoors[(entity.y, entity.x)]
-				if((new_y, new_x) in hallway):
+				if(new_coords in hallway):
 					entity.y = new_y
 					entity.x = new_x
 					entity.location = hallway
 					return True
 		elif(isinstance(entity.location, Hallway)):
 			hallway = entity.location
-			if((new_y, new_x) in hallway):
-				entity.y = new_y
-				entity.x = new_x
+			if(new_coords in hallway):
+				entity.y, entity.x = new_coords
 				return True
-			elif((new_y, new_x) == hallway.door1 or (new_y, new_x) == hallway.door2):
-				entity.y = new_y
-				entity.x = new_x
-				entity.location = hallway.room1 if (new_y, new_x) == hallway.door1 else hallway.room2
+			elif(new_coords == hallway.door1 or new_coords == hallway.door2):
+				entity.y, entity.x = new_coords
+				entity.location = hallway.room1 if new_coords == hallway.door1 else hallway.room2
 				return True
 			else:
 				for hall2 in self.hallways:
-					if((new_y, new_x) in hall2):
-						entity.y = new_y
-						entity.x = new_x
+					if(new_coords in hall2):
+						entity.y, entity.x = new_coords
 						entity.location = hall2
 						return True
 				for room in self.rooms:
-					if((new_y, new_x) in room.hallwaydoors):
-						entity.y = new_y
-						entity.x = new_x
+					if(new_coords in room.hallwaydoors):
+						entity.y, entity.x = new_coords
 						entity.location = room
 						return True
 		return False
 	def draw(self, window):
 		for room in self.rooms:
 			room.draw(window)
-
 		for hallway in self.hallways:
 			hallway.draw(window)
 
@@ -221,7 +231,7 @@ def generate_rooms():
 		for _ in range(len(rooms), num_rooms):
 			width = randint(MIN_ROOM_WIDTH, MAX_ROOM_WIDTH)
 			height = randint(MIN_ROOM_HEIGHT, MAX_ROOM_HEIGHT)
-			rooms.append(Room(randint(0, LEVEL_HEIGHT-height), randint(0, LEVEL_WIDTH-width), height, width))
+			rooms.append(Room(randint(0, LEVEL_HEIGHT-height-1), randint(0, LEVEL_WIDTH-width-1), height, width))
 		#Remove overlap
 		original_rooms = rooms[:]
 		for room1 in original_rooms:
@@ -306,6 +316,35 @@ key_directions = {curses.KEY_UP: (-1, 0),
 				  # curses.KEY_SRIGHT: (1, 1)
 				  }
 
+def noutrefresh_pad(pad, player, level):
+	if (level.max_y - level.min_y) < curses.LINES-1:
+		offset_y = (curses.LINES-level.max_y+level.min_y)//2
+		new_y = level.min_y
+	else:
+		offset_y = 1
+		if level.max_y - player.y < ((curses.LINES-2)//2):
+			new_y = level.max_y - curses.LINES + 3
+		else:
+			new_y = player.y - ((curses.LINES-2)//2)
+			if new_y < level.min_y:
+				new_y = level.min_y
+	if (level.max_x - level.min_x) < curses.COLS:
+		offset_x = (curses.COLS-level.max_x+level.min_x)//2
+		new_x = level.min_x
+	else:
+		offset_x = 0
+		if level.max_x - player.x  < ((curses.COLS-1)//2):
+			new_x = level.max_x - curses.COLS + 2
+		else:
+			new_x = player.x-((curses.COLS-1)//2)
+			if new_x < level.min_x:
+				new_x = level.min_x
+	pad.noutrefresh(new_y, new_x, offset_y, offset_x, curses.LINES-2, curses.COLS-1)
+
+def refresh_pad(pad, player, level):
+	noutrefresh_pad(pad, player, level)
+	curses.doupdate()
+
 def main(scrwindow):
 	#For now this simply creates a window full of "a"s, and it should also resize properly.
 	#Kill command is currently required to exit.
@@ -314,37 +353,45 @@ def main(scrwindow):
 	#Then if the pad isn't large enough to fit on the screen, center the viewable part of the pad on the player.
 	curses.curs_set(0)
 	scrwindow.clear()
-	global LEVEL_HEIGHT, LEVEL_WIDTH
-	LEVEL_HEIGHT = curses.LINES-1
-	LEVEL_WIDTH = curses.COLS-2
+	# global LEVEL_HEIGHT, LEVEL_WIDTH
+	# LEVEL_HEIGHT = curses.LINES-1
+	# LEVEL_WIDTH = curses.COLS-2
 	# for room in rooms:
 	# 	room.draw(scrwindow)
 	# scrwindow.refresh()
 	# scrwindow.getch()
+	gamewindow = curses.newpad(LEVEL_HEIGHT, LEVEL_WIDTH)
 	level = generate_level()
 	start_room = level.rooms[0]
 	player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
-	level.draw(scrwindow)
-	player.draw(scrwindow)
+	level.draw(gamewindow)
+	player.draw(gamewindow)
+	# gamewindow.border()
 	# scrwindow.addstr(0, 0, str(player.location))
 	# scrwindow.addstr(1, 0, str((player.y, player.x)))
-	scrwindow.refresh()
+	scrwindow.noutrefresh()
+	refresh_pad(gamewindow, player, level)
+	# curses.doupdate()
 	while True:
 		do_update = False
 		key = scrwindow.getch()
-		player.location.draw(scrwindow)
+		player.location.draw(gamewindow)
 		if key == curses.KEY_RESIZE:
 			curses.update_lines_cols()
-			scrwindow.clear()
-			level.draw(scrwindow)
-			player.draw(scrwindow)
-			scrwindow.refresh()
+			gamewindow.clear()
+			level.draw(gamewindow)
+			player.draw(gamewindow)
+			scrwindow.noutrefresh()
+			refresh_pad(gamewindow, player, level)
+			# curses.doupdate()
 		elif key in key_directions:
 			do_update = level.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
-		player.draw(scrwindow)
+		player.draw(gamewindow)
 		# scrwindow.addstr(0, 0, str(player.location))
 		# scrwindow.addstr(0, 0, str(player.location))
-		scrwindow.refresh()
+		scrwindow.erase()
+		scrwindow.noutrefresh()
+		refresh_pad(gamewindow, player, level)
 
 #seed(1)
 # print(random.getstate())

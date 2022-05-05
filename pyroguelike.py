@@ -12,6 +12,7 @@ MIN_ROOM_WIDTH = 5
 MAX_ROOM_WIDTH = 20
 MIN_ROOM_HEIGHT = 5
 MAX_ROOM_HEIGHT = 10
+message = "test message please ignore"
 
 def saferange(a, b):
 	return range(b, a+1) if a > b else range(a, b+1)
@@ -192,7 +193,7 @@ class Player:
 		self.maxhealth = 20
 		self.health = self.maxhealth
 	def status(self):
-		return f"Hp: {self.health}({self.maxhealth})	Str: {self.strength}"
+		return f"Hp: {self.health}({self.maxhealth})     Str: {self.strength}"
 	@property
 	def position(self):
 		return (self.y, self.x)
@@ -390,17 +391,29 @@ def noutrefresh_pad(pad, player, level):
 			new_x = player.x-((curses.COLS-1)//2)
 			if new_x < level.min_x:
 				new_x = level.min_x
-	pad.noutrefresh(new_y, new_x, offset_y, offset_x, curses.LINES-2, curses.COLS-4)
+	pad.noutrefresh(new_y, new_x, offset_y, offset_x, curses.LINES-2, curses.COLS-1)
 
 def refresh_pad(pad, player, level):
 	noutrefresh_pad(pad, player, level)
 	curses.doupdate()
 
 def draw_statusbar(window, player):
+	status = player.status()
+	if(len(status) >= curses.COLS-1):
+		status = status[:(curses.COLS-2)]
 	window.erase()
-	window.addstr(1, 0, player.status())
+	window.addstr(0, 1, status)
 	window.noutrefresh()
 
+def draw_messagebar(window):
+	global message
+	drawmessage = message
+	if(len(drawmessage) >= curses.COLS-1):
+		drawmessage = drawmessage[:(curses.COLS-2)]
+	window.erase()
+	window.addstr(0, 1, drawmessage)
+	window.noutrefresh()
+	# message = ""
 def main(scrwindow):
 	#For now this simply creates a window full of "a"s, and it should also resize properly.
 	#Kill command is currently required to exit.
@@ -416,8 +429,10 @@ def main(scrwindow):
 	# 	room.draw(scrwindow)
 	# scrwindow.refresh()
 	# scrwindow.getch()
+	global message
 	gamewindow = curses.newpad(LEVEL_HEIGHT, LEVEL_WIDTH)
-	statusbar = scrwindow.subwin(3, curses.COLS, curses.COLS-4)
+	statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
+	messagebar = scrwindow.subwin(1, curses.COLS, 0, 0)
 	level = generate_level()
 	start_room = level.rooms[0]
 	player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
@@ -428,7 +443,8 @@ def main(scrwindow):
 	# scrwindow.addstr(0, 0, str(player.location))
 	# scrwindow.addstr(1, 0, str((player.y, player.x)))
 	scrwindow.noutrefresh()
-	draw_statusbar(statusbar)
+	draw_statusbar(statusbar, player)
+	draw_messagebar(messagebar)
 	refresh_pad(gamewindow, player, level)
 	# curses.doupdate()
 	while True:
@@ -437,21 +453,27 @@ def main(scrwindow):
 		player.location.draw(gamewindow)
 		if key == curses.KEY_RESIZE:
 			curses.update_lines_cols()
+			statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
+			messagebar = scrwindow.subwin(1, curses.COLS, 0, 0)
 			gamewindow.clear()
 			level.draw(gamewindow)
 			player.draw(gamewindow)
+			draw_statusbar(statusbar, player)
+			draw_messagebar(messagebar)
 			scrwindow.noutrefresh()
 			refresh_pad(gamewindow, player, level)
 			# curses.doupdate()
 		elif key in key_directions:
 			do_update = level.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
-		player.draw(gamewindow)
-		# scrwindow.addstr(0, 0, str(player.location))
-		# scrwindow.addstr(0, 0, str(player.location))
-		scrwindow.erase()
-		scrwindow.noutrefresh()
-		draw_statusbar(statusbar)
-		refresh_pad(gamewindow, player, level)
+		if key != -1:
+			player.draw(gamewindow)
+			# scrwindow.addstr(0, 0, str(player.location))
+			# scrwindow.addstr(0, 0, str(player.location))
+			scrwindow.erase()
+			scrwindow.noutrefresh()
+			draw_statusbar(statusbar, player)
+			draw_messagebar(messagebar)
+			refresh_pad(gamewindow, player, level)
 
 #seed(1)
 # print(random.getstate())

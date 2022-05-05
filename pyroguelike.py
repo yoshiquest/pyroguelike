@@ -191,6 +191,8 @@ class Player:
 		self.strength = 10
 		self.maxhealth = 20
 		self.health = self.maxhealth
+	def status(self):
+		return f"Hp: {self.health}({self.maxhealth})	Str: {self.strength}"
 	@property
 	def position(self):
 		return (self.y, self.x)
@@ -388,11 +390,16 @@ def noutrefresh_pad(pad, player, level):
 			new_x = player.x-((curses.COLS-1)//2)
 			if new_x < level.min_x:
 				new_x = level.min_x
-	pad.noutrefresh(new_y, new_x, offset_y, offset_x, curses.LINES-2, curses.COLS-1)
+	pad.noutrefresh(new_y, new_x, offset_y, offset_x, curses.LINES-2, curses.COLS-4)
 
 def refresh_pad(pad, player, level):
 	noutrefresh_pad(pad, player, level)
 	curses.doupdate()
+
+def draw_statusbar(window, player):
+	window.erase()
+	window.addstr(1, 0, player.status())
+	window.noutrefresh()
 
 def main(scrwindow):
 	#For now this simply creates a window full of "a"s, and it should also resize properly.
@@ -410,6 +417,7 @@ def main(scrwindow):
 	# scrwindow.refresh()
 	# scrwindow.getch()
 	gamewindow = curses.newpad(LEVEL_HEIGHT, LEVEL_WIDTH)
+	statusbar = scrwindow.subwin(3, curses.COLS, curses.COLS-4)
 	level = generate_level()
 	start_room = level.rooms[0]
 	player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
@@ -420,6 +428,7 @@ def main(scrwindow):
 	# scrwindow.addstr(0, 0, str(player.location))
 	# scrwindow.addstr(1, 0, str((player.y, player.x)))
 	scrwindow.noutrefresh()
+	draw_statusbar(statusbar)
 	refresh_pad(gamewindow, player, level)
 	# curses.doupdate()
 	while True:
@@ -441,6 +450,7 @@ def main(scrwindow):
 		# scrwindow.addstr(0, 0, str(player.location))
 		scrwindow.erase()
 		scrwindow.noutrefresh()
+		draw_statusbar(statusbar)
 		refresh_pad(gamewindow, player, level)
 
 #seed(1)

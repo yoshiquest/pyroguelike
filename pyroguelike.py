@@ -166,8 +166,8 @@ class Room:
 		# window.addstr(self.y+1, self.x+1, str(self))
 
 class Enemy:
-	def __init__(self, y, x, start_room, symbol, attack, maxhealth):
-		self.y, self.x, self.location, self.symbol, self.attack, self.health, self.maxhealth = (y, x, start_room, symbol, attack, maxhealth, maxhealth)
+	def __init__(self, y, x, start_room, symbol, strength, maxhealth):
+		self.y, self.x, self.location, self.symbol, self.strength, self.health, self.maxhealth = (y, x, start_room, symbol, strength, maxhealth, maxhealth)
 	def draw(self, window):
 		window.addch(self.y, self.x, self.symbol)
 	@property
@@ -188,6 +188,9 @@ class Player:
 		self.y = y
 		self.x = x
 		self.location = start_room
+		self.strength = 10
+		self.maxhealth = 20
+		self.health = self.maxhealth
 	@property
 	def position(self):
 		return (self.y, self.x)
@@ -195,10 +198,10 @@ class Player:
 		window.addch(self.y, self.x, "@")
 
 class Level:
-	def __init__(self, rooms, hallways, player=None, residents=[]):
+	def __init__(self, rooms, hallways, residents=[]):
 		self.rooms = rooms
 		self.hallways = hallways
-		self.player = player
+		self.player = None
 		self.residents = residents
 	@property
 	def min_x(self):
@@ -409,7 +412,9 @@ def main(scrwindow):
 	gamewindow = curses.newpad(LEVEL_HEIGHT, LEVEL_WIDTH)
 	level = generate_level()
 	start_room = level.rooms[0]
-	
+	player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
+	level.player = player
+	level.draw(gamewindow)
 	player.draw(gamewindow)
 	# gamewindow.border()
 	# scrwindow.addstr(0, 0, str(player.location))

@@ -1,6 +1,8 @@
 import curses
 import random
 from random import randint, sample, shuffle, seed
+from abc import ABC, abstractmethod
+from math import copysign
 
 LEVEL_WIDTH = 100
 LEVEL_HEIGHT = 50
@@ -51,6 +53,13 @@ def swapxy(t):
 		return t[1::-1] + t[:1:-1]
 	else:
 		return t[::-1]
+
+def direction(x1, x2):
+	if x1-x2 == 0:
+		return 0
+	if x1-x2 < 0:
+		return -1
+	return 1
 
 #TODO:
 #Generate level by creating 3-6(?) randomly sized an located rooms. Delete overlapping rooms, and create hallways to connect them.
@@ -156,18 +165,41 @@ class Room:
 			window.addch(door[0], door[1], "+")
 		# window.addstr(self.y+1, self.x+1, str(self))
 
+class Enemy:
+	def __init__(self, y, x, start_room, symbol, attack, maxhealth):
+		self.y, self.x, self.location, self.symbol, self.attack, self.health, self.maxhealth = (y, x, start_room, symbol, attack, maxhealth, maxhealth)
+	def draw(self, window):
+		window.addch(self.y, self.x, self.symbol)
+	@property
+	def position(self):
+		return (self.y, self.x)
+	def ai_move_to(self, player):
+		#Don't move if player isn't in the same room
+		if(player in self.location):
+			# #Don't move if we're right next to the player
+			# if(abs(self.y - player.y) < 2 and abs(self.x - player.x) < 2):
+			# 	return None
+			return (self.y + direction(player.y, self.y), self.x + direction(player.x, self.x))
+		return None
+
+
 class Player:
 	def __init__(self, y, x, start_room):
 		self.y = y
 		self.x = x
 		self.location = start_room
+	@property
+	def position(self):
+		return (self.y, self.x)
 	def draw(self, window):
 		window.addch(self.y, self.x, "@")
 
 class Level:
-	def __init__(self, rooms, hallways):
+	def __init__(self, rooms, hallways, player=None, residents=[]):
 		self.rooms = rooms
 		self.hallways = hallways
+		self.player = player
+		self.residents = residents
 	@property
 	def min_x(self):
 		return min(self.rooms, key=lambda r: r.x).x
@@ -183,6 +215,12 @@ class Level:
 	def move(self, entity, new_y, new_x):
 		"Attempts to move entity to new_y, new_x. Returns True if moved successfully, False otherwise."
 		new_coords = (new_y, new_x)
+		if(self.player is not None and entity is not self.player and new_coords == self.player.position):
+			entity.attack(self.player)
+		for resident in self.residents:
+			if(resident.position == new_coords):
+				entity.attack(resident)
+				return False
 		if(isinstance(entity.location, Room)):
 			room = entity.location
 			if((new_y < room.yheight and room.y < new_y and new_x < room.xwidth and room.x < new_x) or
@@ -314,6 +352,14 @@ key_directions = {curses.KEY_UP: (-1, 0),
 				  # curses.KEY_SF: (1, -1), #Shift Down
 				  # curses.KEY_SLEFT: (-1, -1),
 				  # curses.KEY_SRIGHT: (1, 1)
+				  121: (-1, -1), #y
+				  117: (-1, 1), #u
+				  98: (1, -1), #b
+				  110: (1, 1), #n
+				  104: (0, -1), #h
+				  106: (-1, 0), #j
+				  107: (1, 0), #k
+				  108: (0, 1) #l
 				  }
 
 def noutrefresh_pad(pad, player, level):
@@ -363,8 +409,7 @@ def main(scrwindow):
 	gamewindow = curses.newpad(LEVEL_HEIGHT, LEVEL_WIDTH)
 	level = generate_level()
 	start_room = level.rooms[0]
-	player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
-	level.draw(gamewindow)
+	
 	player.draw(gamewindow)
 	# gamewindow.border()
 	# scrwindow.addstr(0, 0, str(player.location))

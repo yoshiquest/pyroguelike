@@ -14,6 +14,8 @@ MIN_ROOM_HEIGHT = 5
 MAX_ROOM_HEIGHT = 10
 message = "test message please ignore"
 
+def roll(die, sides):
+	return randint(die, sides*die)
 def saferange(a, b):
 	return range(b, a+1) if a > b else range(a, b+1)
 def minmax(coll):
@@ -164,48 +166,84 @@ class Room:
 		#Add the doors:
 		for door in self.hallwaydoors.keys():
 			window.addch(door[0], door[1], "+")
-		# window.addstr(self.y+1, self.x+1, str(self))
 
-class Enemy:
-	def __init__(self, y, x, start_room, symbol, strength, maxhealth):
-		self.y, self.x, self.location, self.symbol, self.strength, self.health, self.maxhealth = (y, x, start_room, symbol, strength, maxhealth, maxhealth)
+class Entity:
+	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, maxhealth, base_dmg):
+		self.y, self.x, self.location, self.name, self.symbol, self.lvl, self.exp, self.armor, self.base_dmg = (y, x, start_room, name, symbol, lvl, exp, armor, base_dmg)
+		if(isinstance(maxhealth, tuple)):
+			self.maxhealth = roll(*maxhealth)
+		else:
+			self.maxhealth = maxhealth
+		self.health = self.maxhealth
 	def draw(self, window):
 		window.addch(self.y, self.x, self.symbol)
 	@property
 	def position(self):
 		return (self.y, self.x)
-	def ai_move_to(self, player):
-		#Don't move if player isn't in the same room
-		if(player in self.location):
-			# #Don't move if we're right next to the player
-			# if(abs(self.y - player.y) < 2 and abs(self.x - player.x) < 2):
-			# 	return None
-			return (self.y + direction(player.y, self.y), self.x + direction(player.x, self.x))
-		return None
-
-
-class Player:
-	def __init__(self, y, x, start_room):
-		self.y = y
-		self.x = x
-		self.location = start_room
-		self.strength = 10
-		self.maxhealth = 20
-		self.health = self.maxhealth
-	def status(self):
-		return f"Hp: {self.health}({self.maxhealth})     Str: {self.strength}"
 	@property
-	def position(self):
-		return (self.y, self.x)
-	def draw(self, window):
-		window.addch(self.y, self.x, "@")
+	def ac(self):
+		return 11 - self.armor
+	def roll_damage(self):
+		return roll(*self.base_dmg)
+
+class Enemy(Entity):
+	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, base_dmg):
+		super().__init__(y, x, start_room, name, symbol, lvl, exp, armor, (lvl, 8), base_dmg)
+	def ai_move_to(self, player):
+			#Don't move if player isn't in the same room
+			if(player in self.location):
+				return (self.y + direction(player.y, self.y), self.x + direction(player.x, self.x))
+			return None
+
+class Player(Entity):
+	def __init__(self, y, x, start_room):
+		self.strength = 16
+		self.maxstrength = 16
+		self.inventory = []
+		self.eqweapon = None
+		self.eqarmor = None
+		self.gold = 0
+		self.floor = 1
+		self.next_exp = 10
+		super().__init__(y, x, start_room, "Player", "@", 1, 0, 1, 12, (1,4))
+	def status(self):
+		return f"Floor: {self.floor} Gold: {self.gold} Hp: {self.health}({self.maxhealth}) Str: {self.strength}({self.maxstrength}) Arm: {self.armor} Level: {self.lvl} Exp: {self.exp}/{self.next_exp}"
+	@property
+	def exp(self):
+		return self._exp
+	@exp.setter
+	def exp(self, value):
+		if(value >= self.next_exp):
+			self.lvl+=1
+			self.next_exp*=2
+		self._exp = value
+
+def attack_roll(attacker, defender):
+	atk_roll = roll(1, 20) + 1
+	def_val = 20 - attacker.lvl - defender.ac
+	if(isinstance(attacker, Player)):
+		if(attacker.strength < 7):
+			atk_roll+=attacker.strength - 7
+		else:
+			if(attacker.strength > 16):
+				atk_roll+=1
+			if(attacker.strength > 18):
+				atk_roll+=1
+			if(attacker.strength > 20):
+				atk_roll+=1
+			if(attcker.strength > 30):
+				atk_roll+=1
+	return atk_roll >= def_val
+
+enemy_list = [(range(1, 9), "Bat", "b", )]
 
 class Level:
-	def __init__(self, rooms, hallways, residents=[]):
+	def __init__(self, rooms, hallways, player, enemies=[]):
 		self.rooms = rooms
 		self.hallways = hallways
-		self.player = None
-		self.residents = residents
+		self.player = player
+		self.enemies = enemies
+		self.locations_to_update = [player.location]
 	@property
 	def min_x(self):
 		return min(self.rooms, key=lambda r: r.x).x
@@ -218,15 +256,8 @@ class Level:
 	@property
 	def max_y(self):
 		return max(self.rooms, key=Room.yheight.fget).yheight
-	def move(self, entity, new_y, new_x):
-		"Attempts to move entity to new_y, new_x. Returns True if moved successfully, False otherwise."
+	def _move_sub(self, entity, new_y, new_x):
 		new_coords = (new_y, new_x)
-		if(self.player is not None and entity is not self.player and new_coords == self.player.position):
-			entity.attack(self.player)
-		for resident in self.residents:
-			if(resident.position == new_coords):
-				entity.attack(resident)
-				return False
 		if(isinstance(entity.location, Room)):
 			room = entity.location
 			if((new_y < room.yheight and room.y < new_y and new_x < room.xwidth and room.x < new_x) or
@@ -236,8 +267,7 @@ class Level:
 			elif((entity.y, entity.x) in room.hallwaydoors):
 				hallway = room.hallwaydoors[(entity.y, entity.x)]
 				if(new_coords in hallway):
-					entity.y = new_y
-					entity.x = new_x
+					entity.y, entity.x = new_coords
 					entity.location = hallway
 					return True
 		elif(isinstance(entity.location, Hallway)):
@@ -261,11 +291,39 @@ class Level:
 						entity.location = room
 						return True
 		return False
+	def move(self, entity, new_y, new_x):
+		"Attempts to move entity to new_y, new_x. Returns True if moved successfully, False otherwise."
+		if(entity is not self.player and (new_y, new_x) == self.player.position):
+			# entity.attack(self.player)
+			return False
+		for enemy in self.enemies:
+			if(enemy.position == (new_y, new_x)):
+				if(entity is self.player):
+					#TODO: Add attack code here.
+					# entity.attack(enemy)
+					return False
+				else:
+					return False
+		result = self._move_sub(entity, new_y, new_x)
+		if(result):
+			self.locations_to_update.append(entity.location)
+		return result
+	def draw_update(self, window):
+		for location in self.locations_to_update:
+			location.draw(window)
+			for enemy in self.enemies:
+				if enemy.position in location:
+					enemy.draw(window)
+		self.player.draw(window)
+		self.locations_to_update = [self.player.location]
 	def draw(self, window):
 		for room in self.rooms:
 			room.draw(window)
 		for hallway in self.hallways:
 			hallway.draw(window)
+		for enemy in self.enemies:
+			enemy.draw(window)
+		self.player.draw(window)
 
 def generate_rooms():
 	rooms = []
@@ -344,11 +402,14 @@ def generate_hallways(rooms):
 		num_iter+=1
 	return hallways
 
-def generate_level():
+def generate_level(player=None):
 	rooms = generate_rooms()
 	while((hallways := generate_hallways(rooms)) is None):
 		rooms = generate_rooms()
-	return Level(rooms, hallways)
+	if(player is None):
+		start_room = rooms[0]
+		player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
+	return Level(rooms, hallways, player)
 
 key_directions = {curses.KEY_UP: (-1, 0),
 				  curses.KEY_DOWN: (1, 0),
@@ -434,11 +495,8 @@ def main(scrwindow):
 	statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
 	messagebar = scrwindow.subwin(1, curses.COLS, 0, 0)
 	level = generate_level()
-	start_room = level.rooms[0]
-	player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
-	level.player = player
+	player = level.player
 	level.draw(gamewindow)
-	player.draw(gamewindow)
 	# gamewindow.border()
 	# scrwindow.addstr(0, 0, str(player.location))
 	# scrwindow.addstr(1, 0, str((player.y, player.x)))
@@ -450,14 +508,12 @@ def main(scrwindow):
 	while True:
 		do_update = False
 		key = scrwindow.getch()
-		player.location.draw(gamewindow)
 		if key == curses.KEY_RESIZE:
 			curses.update_lines_cols()
 			statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
 			messagebar = scrwindow.subwin(1, curses.COLS, 0, 0)
 			gamewindow.clear()
 			level.draw(gamewindow)
-			player.draw(gamewindow)
 			draw_statusbar(statusbar, player)
 			draw_messagebar(messagebar)
 			scrwindow.noutrefresh()
@@ -465,14 +521,14 @@ def main(scrwindow):
 			# curses.doupdate()
 		elif key in key_directions:
 			do_update = level.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
-		if key != -1:
-			player.draw(gamewindow)
+		if key != -1 and do_update:
+			level.draw_update(gamewindow)
 			# scrwindow.addstr(0, 0, str(player.location))
 			# scrwindow.addstr(0, 0, str(player.location))
 			scrwindow.erase()
 			scrwindow.noutrefresh()
-			draw_statusbar(statusbar, player)
 			draw_messagebar(messagebar)
+			draw_statusbar(statusbar, player)
 			refresh_pad(gamewindow, player, level)
 
 #seed(1)

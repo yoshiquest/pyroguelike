@@ -12,8 +12,10 @@ MIN_ROOM_WIDTH = 5
 MAX_ROOM_WIDTH = 20
 MIN_ROOM_HEIGHT = 5
 MAX_ROOM_HEIGHT = 10
-MIN_ENEMIES = 3
-MAX_ENEMIES = 3
+MIN_ENEMIES = 10
+MAX_ENEMIES = 10
+MIN_THINGS = 3
+MAX_THINGS = 9
 message = ""
 turn = 0
 
@@ -87,11 +89,6 @@ def direction(x1, x2):
 		return -1
 	return 1
 
-#TODO:
-#Generate level by creating 3-6(?) randomly sized an located rooms. Delete overlapping rooms, and create hallways to connect them.
-#Each of these classes will have a "draw" function to aid in refreshing the screen. By separating it, we can hopefully only redraw what is needed.
-#Bounds checking can also be done on a per-room/hallway basis. That way instead of checking the whole map bounds, we only check the respective location's bounds.
-#By having each hallway store the rooms they're connected to (and maybe vice-versa), we can also more easily check bounds between a room and hallway.
 class Hallway:
 	def __init__(self, room1, room2):
 		self.room1 = room1
@@ -224,8 +221,11 @@ class GroundItem:
 			return "]"
 		else:
 			return "_"
+	@property
+	def position(self):
+		return (self.y, self.x)
 	def __repr__(self):
-		return f"{self.item} @ ({self.y},{self.x})"
+		return self.item.name
 	def draw(self, window):
 		window.addch(self.y, self.x, self.symbol)
 
@@ -354,6 +354,12 @@ def attack_roll(attacker, defender):
 
 enemy_types = [(range(1, 9), "Bat", "B", 1, 1, 2, (1,2))]
 
+def get_location(locations, y, x):
+	for location in locations:
+		if (y, x) in location:
+			return location
+	return None
+
 class Level:
 	def __init__(self, rooms, hallways, player, enemies=[], items=[]):
 		self.rooms = rooms
@@ -425,6 +431,11 @@ class Level:
 		result = self._move_sub(entity, new_y, new_x)
 		if(result and entity.location not in self.locations_to_update):
 			self.locations_to_update.append(entity.location)
+		if(result and entity is self.player):
+			for item in self.items:
+				if(entity.position == item.position):
+					global message
+					message = f"You see a {item} on the ground."
 		return result
 	def attack(self, entity1, entity2):
 		global message
@@ -445,6 +456,9 @@ class Level:
 	def draw_update(self, window):
 		for location in self.locations_to_update:
 			location.draw(window)
+			for item in self.items:
+				if item.location is location:
+					item.draw(window)
 			for enemy in self.enemies:
 				if enemy.location is location:
 					enemy.draw(window)
@@ -470,6 +484,8 @@ class Level:
 			room.draw(window)
 		for hallway in self.hallways:
 			hallway.draw(window)
+		for item in self.items:
+			item.draw(window)
 		for enemy in self.enemies:
 			enemy.draw(window)
 		self.player.draw(window)
@@ -551,6 +567,14 @@ def generate_hallways(rooms):
 		num_iter+=1
 	return hallways
 
+def generate_items(rooms):
+	item_locations = set()
+	num_items = randint(MIN_THINGS, MAX_THINGS)
+	while(len(item_locations) < num_items):
+		roomnum = randint(0, len(rooms)-1)
+		item_locations.add((randint(rooms[roomnum].y+1, rooms[roomnum].yheight-1), randint(rooms[roomnum].x+1, rooms[roomnum].xwidth-1), roomnum))
+	return [rand_drop(y,x,rooms[roomnum]) for y,x,roomnum in list(item_locations)]
+
 def generate_enemies(rooms, hallways, floor, player):
 	num_enemies = randint(MIN_ENEMIES, MAX_ENEMIES)
 	valid_enemy_types = list(map(lambda x: x[1:], filter(lambda x: floor in x[0], enemy_types)))
@@ -579,8 +603,9 @@ def generate_level(floor, player=None):
 	if(player is None):
 		start_room = rooms[0]
 		player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
+	items = generate_items(rooms)
 	enemies = generate_enemies(rooms, hallways, floor, player)
-	return Level(rooms, hallways, player, enemies)
+	return Level(rooms, hallways, player, enemies, items)
 
 key_directions = {curses.KEY_UP: (-1, 0),
 				  curses.KEY_DOWN: (1, 0),

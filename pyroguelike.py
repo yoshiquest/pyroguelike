@@ -7,7 +7,7 @@ from math import copysign
 LEVEL_WIDTH = 100
 LEVEL_HEIGHT = 50
 MIN_ROOMS = 3
-MAX_ROOMS = 8
+MAX_ROOMS = 9
 MIN_ROOM_WIDTH = 5
 MAX_ROOM_WIDTH = 20
 MIN_ROOM_HEIGHT = 5
@@ -23,6 +23,14 @@ def saferange(a, b):
 	return range(b, a+1) if a > b else range(a, b+1)
 def minmax(coll):
 	return (min(coll), max(coll))
+
+def make_linefn(y1, x1, y2, x2):
+	m = (y2-y1)/(x2-x1)
+	b = y1 - m*x1
+	def yfn(x):
+		return round(m * x + b)
+	return yfn
+
 class HallwaySegment:
 	def __init__(self, y1, x1, y2, x2):
 		self.y1 = y1
@@ -30,9 +38,16 @@ class HallwaySegment:
 		self.y2 = y2
 		self.x2 = x2
 	def draw(self, window):
-		for y in saferange(self.y1, self.y2):
+		if(self.y1 == self.y2):
 			for x in saferange(self.x1, self.x2):
-				window.addch(y, x, curses.ACS_CKBOARD)
+				window.addch(self.y1, x, curses.ACS_CKBOARD)
+		elif(self.x1 == self.x2):
+			for y in saferange(self.y1, self.y2):
+				window.addch(y, self.x1, curses.ACS_CKBOARD)
+		else:
+			yfn = make_linefn(self.y1, self.x1, self.y2, self.x2)
+			for x in saferange(self.x1, self.x2):
+				window.addch(yfn(x), x, curses.ACS_CKBOARD)
 	@property
 	def xmin(self):
 		return self.x1 if self.x1 < self.x2 else self.x2
@@ -51,7 +66,12 @@ class HallwaySegment:
 		if(isinstance(element, tuple)):
 			if(len(element) == 2):
 				y,x = element
-				return (y in saferange(self.y1, self.y2)) and (x in saferange(self.x1, self.x2))
+				if(self.x1 == self.x2 or self.y1 == self.y2):
+					return (y in saferange(self.y1, self.y2)) and (x in saferange(self.x1, self.x2))
+				else:
+					yfn = make_linefn(self.y1, self.x1, self.y2, self.x2)
+					return (y == yfn(x))
+
 		return False
 
 def swapxy(t):
@@ -173,6 +193,67 @@ class Room:
 		for door in self.hallwaydoors.keys():
 			window.addch(door[0], door[1], "+")
 
+weapon_types = [("Mace", (2,4)), ("Long sword", (3,4)), ("Dagger", (1,6)), ("2H sword", (4,4)), ("Spear", (2,3))]
+armor_types = [("Leather", 2), ("Ring Mail", 3), ("Studded Leather", 3), ("Scale Mail", 4), ("Chain Mail", 5), ("Splint Mail", 6), ("Banded Mail", 6), ("Plate Mail", 7)]
+STARTING_WEAPON_TYPE = 0
+STARTING_WEAPON_MODS = (1, 1)
+STARTING_ARMOR_TYPE = 1
+
+class Weapon:
+	def __init__(self, name, base_dmg, iscursed=False, hit_mod=0, dmg_mod=0):
+		self.name, self.base_dmg,  self.iscursed, self.hit_mod, self.dmg_mod,= (name, base_dmg, iscursed, hit_mod, dmg_mod)
+	def __repr__(self):
+		return f"{self.name} {'+' if self.hit_mod >= 0 else ''}{self.hit_mod}{'+' if self.dmg_mod >= 0 else ''}{self.dmg_mod}"
+	def roll_damage(self):
+		return roll(*self.base_dmg)+self.dmg_mod
+
+class Armor:
+	def __init__(self, name, armor, iscursed=False):
+		self.name, self.armor, self.iscursed = (name, armor, iscursed)
+	def __repr__(self):
+		return f"{self.name} {'+' if self.armor >= 0 else ''}{self.armor}"
+
+class GroundItem:
+	def __init__(self, y, x, location, item, amount=1):
+		self.y, self.x, self.location, self.item, self.amount = (y, x, location, item, amount)
+	@property
+	def symbol(self):
+		if(isinstance(self.item, Weapon)):
+			return ")"
+		elif(isinstance(self.item, Armor)):
+			return "]"
+		else:
+			return "_"
+	def __repr__(self):
+		return f"{self.item} @ ({self.y},{self.x})"
+	def draw(self, window):
+		window.addch(self.y, self.x, self.symbol)
+
+def rand_weapon():
+	cursed,hmod = False, 0
+	r = randint(0,99)
+	if(r < 10):
+		cursed = True
+		hmod -= randint(1,4)
+	elif(r < 15):
+		hmod += randint(1,4)
+	return (Weapon(*choice(weapon_types), cursed, hmod), 1)
+
+def rand_armor():
+	armor = Armor(*choice(armor_types))
+	r = randint(0,99)
+	if(r < 20):
+		armor.iscursed = True
+		armor.armor -= randint(1,4)
+	elif(r < 28):
+		armor.armor += randint(1,4)
+	return (armor, 1)
+
+rand_item_table = [rand_weapon, rand_armor]
+
+def rand_drop(y, x, location):
+	return GroundItem(y, x, location, *(choice(rand_item_table)()))
+
 class Entity:
 	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, maxhealth, base_dmg):
 		self.y, self.x, self.location, self.name, self.symbol, self.lvl, self.exp, self.armor, self.base_dmg = (y, x, start_room, name, symbol, lvl, exp, armor, base_dmg)
@@ -197,6 +278,8 @@ class Entity:
 		return 11 - self.armor
 	def roll_damage(self):
 		return roll(*self.base_dmg)
+	def hit_mod(self):
+		return 0
 
 class Enemy(Entity):
 	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, base_dmg):
@@ -216,17 +299,24 @@ class Enemy(Entity):
 				return (new_y, new_x)
 			return None
 
+PLAYER_NAME = "Player"
+
+# strength_hmod_table = list(range(-7, 0)) + ([0] * 10) + [1, 1, 2, 2] + ([3] * 10) + [4]
+strength_hmod_table = [-7, -6, -5, -4, -3, -2, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4]
+# strength_dmod_table = list(range(-7, 0)) + ([0] * 9) + [1, 2, 3, 3, 4, 4] + ([5] * 9) + [6]
+strength_dmod_table = [-7, -6, -5, -4, -3, -2, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 3, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6]
+
 class Player(Entity):
 	def __init__(self, y, x, start_room):
 		self.strength = 16
 		self.maxstrength = 16
 		self.inventory = []
-		self.eqweapon = None
-		self.eqarmor = None
+		self.eqweapon = Weapon(*weapon_types[STARTING_WEAPON_TYPE], *STARTING_WEAPON_MODS)
+		self.eqarmor = Armor(*armor_types[STARTING_ARMOR_TYPE])
 		self.gold = 0
 		self.floor = 1
 		self.next_exp = 10
-		super().__init__(y, x, start_room, "Player", "@", 1, 0, 1, 12, (1,4))
+		super().__init__(y, x, start_room, PLAYER_NAME, "@", 1, 0, 1, 12, (1,4))
 	def status(self):
 		return f"Floor: {self.floor} Gold: {self.gold} Hp: {self.health}({self.maxhealth}) Str: {self.strength}({self.maxstrength}) Arm: {self.armor} Level: {self.lvl} Exp: {self.exp}/{self.next_exp}"
 	@property
@@ -238,32 +328,39 @@ class Player(Entity):
 			self.lvl+=1
 			self.next_exp*=2
 		self._exp = value
+	@property
+	def armor(self):
+		if(self.eqarmor is None):
+			return self._armor
+		return self._armor + self.eqarmor.armor
+	@armor.setter
+	def armor(self, value):
+		self._armor = value
+	def roll_damage(self):
+		sdmod = strength_dmod_table[self.strength] if self.strength < len(strength_dmod_table) else strength_dmod_table[-1]
+		if(self.eqweapon is None):
+			return super().roll_damage() + sdmod
+		return self.eqweapon.roll_damage() +sdmod
+	def hit_mod(self):
+		shmod = strength_hmod_table[self.strength] if self.strength < len(strength_hmod_table) else strength_hmod_table[-1]
+		if(self.eqweapon is None):
+			return sdmod
+		return self.eqweapon.hit_mod + shmod
 
 def attack_roll(attacker, defender):
-	atk_roll = roll(1, 20) + 1
+	atk_roll = roll(1, 20) + 1 + attacker.hit_mod()
 	def_val = 20 - attacker.lvl - defender.ac
-	if(isinstance(attacker, Player)):
-		if(attacker.strength < 7):
-			atk_roll+=attacker.strength - 7
-		else:
-			if(attacker.strength > 16):
-				atk_roll+=1
-			if(attacker.strength > 18):
-				atk_roll+=1
-			if(attacker.strength > 20):
-				atk_roll+=1
-			if(attacker.strength > 30):
-				atk_roll+=1
 	return atk_roll >= def_val
 
-enemy_types = [(range(1, 9), "Bat", "b", 1, 1, 2, (1,2))]
+enemy_types = [(range(1, 9), "Bat", "B", 1, 1, 2, (1,2))]
 
 class Level:
-	def __init__(self, rooms, hallways, player, enemies=[]):
+	def __init__(self, rooms, hallways, player, enemies=[], items=[]):
 		self.rooms = rooms
 		self.hallways = hallways
 		self.player = player
 		self.enemies = enemies
+		self.items = items
 		self.locations_to_update = [player.location]
 	@property
 	def min_x(self):

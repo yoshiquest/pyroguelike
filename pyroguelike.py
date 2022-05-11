@@ -12,8 +12,8 @@ MIN_ROOM_WIDTH = 5
 MAX_ROOM_WIDTH = 20
 MIN_ROOM_HEIGHT = 5
 MAX_ROOM_HEIGHT = 10
-MIN_ENEMIES = 10
-MAX_ENEMIES = 10
+MIN_ENEMIES = 3
+MAX_ENEMIES = 9
 MIN_THINGS = 3
 MAX_THINGS = 9
 message = ""
@@ -437,6 +437,16 @@ class Level:
 					global message
 					message = f"You see a {item} on the ground."
 		return result
+	def pickup(self, entity):
+		global message
+		for item in self.items:
+			if(item.position == entity.position):
+				entity.inventory.append((item.amount, item.item))
+				self.items.remove(item)
+				message = f"Picked up a {item}."
+				return True
+		message = "There's nothing here."
+		return False
 	def attack(self, entity1, entity2):
 		global message
 		if(attack_roll(entity1, entity2)):
@@ -663,29 +673,55 @@ def draw_statusbar(window, player):
 	window.noutrefresh()
 
 def draw_messagebar(window):
-	global message
-	drawmessage = message
-	if(len(drawmessage) >= curses.COLS-1):
-		drawmessage = drawmessage[:(curses.COLS-2)]
+	# if(len(drawmessage) >= curses.COLS-1):
+	# 	drawmessage = drawmessage[:(curses.COLS-2)]
 	window.erase()
-	window.addstr(0, 1, drawmessage)
+	window.addnstr(0, 1, message, curses.COLS-1)
 	window.noutrefresh()
 	# message = ""
+
+def draw_inv_menu(window, inventory, selection):
+	lines, cols = window.getmaxyx()
+	if selection < lines//2:
+		start_index = 0
+	elif len(inventory) - selection < lines//2:
+		start_index = len(inventory) - lines
+	else:
+		start_index = selection - lines//2
+	for i in range(lines):
+		invi = i + start_index
+		if(invi >= len(inventory)):
+			return
+		if(invi == selection):
+			window.addnstr(i, 0, str(inventory[invi]), cols, curses.A_STANDOUT)
+		else:
+			window.addnstr(i, 0, str(inventory[invi]), cols)
+
+def inv_menu(window, player):
+	key = None
+	window.erase()
+	invwindow = window.subwin(curses.LINES-1, curses.COLS-3, 1, 0)
+	selection = 0
+	draw_inv_menu(invwindow, player.inventory, selection)
+	invwindow.refresh()
+	while ((key:=window.getch())!=ord(" ") and (key != ord("\n"))):
+		if(key == curses.KEY_RESIZE):
+			curses.update_lines_cols()
+			invwindow = window.subwin(curses.LINES-1, curses.COLS-3, 1, 0)
+		elif((key == curses.KEY_UP or key == 106) and selection > 0):
+			selection-=1
+		elif((key == curses.KEY_DOWN or key == 107) and selection < len(player.inventory) - 1):
+			selection+=1
+		elif(key == 9 or key == ord("q")):
+			return None
+		invwindow.erase()
+		draw_inv_menu(invwindow, player.inventory, selection)
+		invwindow.refresh()
+	return selection
+
 def main(scrwindow):
-	#For now this simply creates a window full of "a"s, and it should also resize properly.
-	#Kill command is currently required to exit.
-	#TODO:
-	#Use a pad to represent the level, make it.... some size, not sure how big yet.
-	#Then if the pad isn't large enough to fit on the screen, center the viewable part of the pad on the player.
 	curses.curs_set(0)
 	scrwindow.clear()
-	# global LEVEL_HEIGHT, LEVEL_WIDTH
-	# LEVEL_HEIGHT = curses.LINES-1
-	# LEVEL_WIDTH = curses.COLS-2
-	# for room in rooms:
-	# 	room.draw(scrwindow)
-	# scrwindow.refresh()
-	# scrwindow.getch()
 	global message
 	gamewindow = curses.newpad(LEVEL_HEIGHT, LEVEL_WIDTH)
 	statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
@@ -693,45 +729,57 @@ def main(scrwindow):
 	level = generate_level(1)
 	player = level.player
 	level.draw(gamewindow)
-	# gamewindow.border()
-	# scrwindow.addstr(0, 0, str(player.location))
-	# scrwindow.addstr(1, 0, str((player.y, player.x)))
 	scrwindow.noutrefresh()
 	draw_statusbar(statusbar, player)
 	draw_messagebar(messagebar)
 	refresh_pad(gamewindow, player, level)
-	# curses.doupdate()
+	def refresh_all():
+		curses.update_lines_cols()
+		statusbar.resize(1, curses.COLS)
+		statusbar.mvwin(curses.LINES-1, 0)
+		messagebar.resize(1, curses.COLS)
+		gamewindow.erase()
+		scrwindow.erase()
+		scrwindow.noutrefresh()
+		draw_statusbar(statusbar, player)
+		draw_messagebar(messagebar)
+		level.draw(gamewindow)
+		refresh_pad(gamewindow, player, level)
 	while True:
 		do_update = False
 		key = scrwindow.getch()
 		if key == curses.KEY_RESIZE:
-			curses.update_lines_cols()
-			statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
-			messagebar = scrwindow.subwin(1, curses.COLS, 0, 0)
-			gamewindow.erase()
-			scrwindow.erase()
-			level.draw(gamewindow)
-			draw_statusbar(statusbar, player)
-			draw_messagebar(messagebar)
-			scrwindow.noutrefresh()
-			refresh_pad(gamewindow, player, level)
-			# curses.doupdate()
-		elif key in key_directions:
-			do_update = level.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
-		elif key == ord("."):
-			do_update = True
-		if key != -1 and do_update:
-			level.tick()
-			level.draw_update(gamewindow)
-			# scrwindow.addstr(0, 0, str(player.location))
-			# scrwindow.addstr(0, 0, str(player.location))
-			scrwindow.erase()
-			scrwindow.noutrefresh()
-			draw_messagebar(messagebar)
-			draw_statusbar(statusbar, player)
-			refresh_pad(gamewindow, player, level)
-			message = ""
+			refresh_all()
+		elif key == ord("i"):
+			if(len(player.inventory)==0):
+				message = "Your inventory is empty!"
+				draw_messagebar(messagebar)
+				curses.doupdate()
+				message = ""
+			else:
+				inv_menu(scrwindow, player)
+				refresh_all()
+		elif key != -1:
+			if key in key_directions:
+				do_update = level.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
+			elif key == ord("."):
+				do_update = True
+			elif key == ord("g"):
+				do_update = level.pickup(player)
+			if do_update:
+				level.tick()
+				level.draw_update(gamewindow)
+				draw_statusbar(statusbar, player)
+				draw_messagebar(messagebar)
+				message = ""
+				refresh_pad(gamewindow, player, level)
+			else:
+				draw_messagebar(messagebar)
+				curses.doupdate()
+				message = ""
+		# message = str(key)
+		# draw_messagebar(messagebar)
+		# curses.doupdate()
+		# message = ""
 
-#seed(1)
-# print(random.getstate())
 curses.wrapper(main)

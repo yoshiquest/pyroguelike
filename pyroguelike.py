@@ -441,7 +441,7 @@ class Level:
 		global message
 		for item in self.items:
 			if(item.position == entity.position):
-				entity.inventory.append((item.amount, item.item))
+				entity.inventory.append((item.item, item.amount))
 				self.items.remove(item)
 				message = f"Picked up a {item}."
 				return True
@@ -719,6 +719,21 @@ def inv_menu(window, player):
 		invwindow.refresh()
 	return selection
 
+def drop_item(level, player, selection):
+	global message
+	if(any(filter(lambda item: item.position == player.position, level.items))):
+		message = "There's an item in the way!"
+	else:
+		message = f"Dropped a {player.inventory[selection]}"
+		level.items.append(GroundItem(player.y, player.x, player.location, *player.inventory[selection]))
+		del player.inventory[selection]
+
+def action_select(level, player, selection):
+	pass
+
+inventory_fns = {ord("i"): action_select,
+				 ord("d"): drop_item}
+
 def main(scrwindow):
 	curses.curs_set(0)
 	scrwindow.clear()
@@ -750,14 +765,16 @@ def main(scrwindow):
 		key = scrwindow.getch()
 		if key == curses.KEY_RESIZE:
 			refresh_all()
-		elif key == ord("i"):
+		elif key in inventory_fns:
 			if(len(player.inventory)==0):
 				message = "Your inventory is empty!"
 				draw_messagebar(messagebar)
 				curses.doupdate()
 				message = ""
 			else:
-				inv_menu(scrwindow, player)
+				selection = inv_menu(scrwindow, player)
+				if(selection is not None):
+					inventory_fns[key](level, player, selection)
 				refresh_all()
 		elif key != -1:
 			if key in key_directions:

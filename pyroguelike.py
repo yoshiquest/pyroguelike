@@ -612,6 +612,8 @@ def generate_items(rooms):
 def generate_enemies(rooms, hallways, floor):
 	num_enemies = randint(MIN_ENEMIES, MAX_ENEMIES)
 	valid_enemy_types = list(map(lambda x: x[1:], filter(lambda x: floor in x[0], enemy_types)))
+	if(valid_enemy_types == []):
+		return []
 	enemy_rooms = []
 	enemy_coordinates = []
 	for _ in range(num_enemies):

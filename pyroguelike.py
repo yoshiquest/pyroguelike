@@ -4,8 +4,8 @@ from random import randint, sample, shuffle, seed, choices, choice
 from abc import ABC, abstractmethod
 from math import copysign
 
-LEVEL_WIDTH = 100
-LEVEL_HEIGHT = 50
+FLOOR_WIDTH = 100
+FLOOR_HEIGHT = 50
 MIN_ROOMS = 3
 MAX_ROOMS = 9
 MIN_ROOM_WIDTH = 5
@@ -18,6 +18,8 @@ MIN_THINGS = 3
 MAX_THINGS = 9
 message = ""
 turn = 0
+player = None
+floors = []
 
 def roll(die, sides):
 	return randint(die, sides*die)
@@ -164,7 +166,8 @@ class Room:
 			if(len(element) == 2):
 				return (element[0] in range(self.y+1, self.yheight)) and (element[1] in range(self.x+1, self.xwidth))
 		return False
-
+	def randposition(self):
+		return (randint(self.y+1, self.yheight-1), randint(self.x+1, self.xwidth-1))
 	def draw(self, window):
 		#Clear interior:
 		for y in range(self.y+1, self.yheight):
@@ -200,7 +203,7 @@ class Weapon:
 	def __init__(self, name, base_dmg, iscursed=False, hit_mod=0, dmg_mod=0):
 		self.name, self.base_dmg,  self.iscursed, self.hit_mod, self.dmg_mod,= (name, base_dmg, iscursed, hit_mod, dmg_mod)
 	def __repr__(self):
-		return f"{self.name} {'+' if self.hit_mod >= 0 else ''}{self.hit_mod}{'+' if self.dmg_mod >= 0 else ''}{self.dmg_mod}"
+		return f"{'Cursed ' if self.iscursed else ''}{self.name} {'+' if self.hit_mod >= 0 else ''}{self.hit_mod}{'+' if self.dmg_mod >= 0 else ''}{self.dmg_mod}"
 	def roll_damage(self):
 		return roll(*self.base_dmg)+self.dmg_mod
 
@@ -284,7 +287,7 @@ class Entity:
 class Enemy(Entity):
 	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, base_dmg):
 		super().__init__(y, x, start_room, name, symbol, lvl, exp, armor, (lvl, 8), base_dmg)
-	def ai_move_to(self, player):
+	def ai_move_to(self):
 			#Don't move if player isn't in the same room
 			if(player.location is self.location):
 				new_y, new_x = (self.y + direction(player.y, self.y), self.x + direction(player.x, self.x))
@@ -311,14 +314,14 @@ class Player(Entity):
 		self.strength = 16
 		self.maxstrength = 16
 		self.inventory = []
-		self.eqweapon = Weapon(*weapon_types[STARTING_WEAPON_TYPE], *STARTING_WEAPON_MODS)
+		self.eqweapon = Weapon(*weapon_types[STARTING_WEAPON_TYPE], False, *STARTING_WEAPON_MODS)
 		self.eqarmor = Armor(*armor_types[STARTING_ARMOR_TYPE])
 		self.gold = 0
-		self.floor = 1
+		self.floor = 0
 		self.next_exp = 10
 		super().__init__(y, x, start_room, PLAYER_NAME, "@", 1, 0, 1, 12, (1,4))
 	def status(self):
-		return f"Floor: {self.floor} Gold: {self.gold} Hp: {self.health}({self.maxhealth}) Str: {self.strength}({self.maxstrength}) Arm: {self.armor} Level: {self.lvl} Exp: {self.exp}/{self.next_exp}"
+		return f"Floor: {self.floor+1} Gold: {self.gold} Hp: {self.health}({self.maxhealth}) Str: {self.strength}({self.maxstrength}) Arm: {self.armor} Level: {self.lvl} Exp: {self.exp}/{self.next_exp}"
 	@property
 	def exp(self):
 		return self._exp
@@ -352,7 +355,7 @@ def attack_roll(attacker, defender):
 	def_val = 20 - attacker.lvl - defender.ac
 	return atk_roll >= def_val
 
-enemy_types = [(range(1, 9), "Bat", "B", 1, 1, 2, (1,2))]
+enemy_types = [(range(0, 8), "Bat", "B", 1, 1, 2, (1,2))]
 
 def get_location(locations, y, x):
 	for location in locations:
@@ -360,14 +363,17 @@ def get_location(locations, y, x):
 			return location
 	return None
 
-class Level:
-	def __init__(self, rooms, hallways, player, enemies=[], items=[]):
+class Floor:
+	def __init__(self, rooms, hallways, upstairs, upstairs_room, downstairs, downstairs_room, enemies=[], items=[]):
 		self.rooms = rooms
 		self.hallways = hallways
-		self.player = player
 		self.enemies = enemies
 		self.items = items
-		self.locations_to_update = [player.location]
+		self.upstairs_room = upstairs_room
+		self.upstairs = upstairs
+		self.downstairs_room = downstairs_room
+		self.downstairs = downstairs
+		self.locations_to_update = [(player.location if upstairs_room is None else upstairs_room)]
 	@property
 	def min_x(self):
 		return min(self.rooms, key=lambda r: r.x).x
@@ -416,13 +422,13 @@ class Level:
 						return True
 		return False
 	def move(self, entity, new_y, new_x):
-		"Attempts to move entity to new_y, new_x. Returns True if moved or attacked successfully, False otherwise."
-		if(entity is not self.player and (new_y, new_x) == self.player.position):
-			self.attack(entity, self.player)
+		"Attempts to move entity to new_y, new_x. Returns True if time passed, False otherwise."
+		if(entity is not player and (new_y, new_x) == player.position):
+			self.attack(entity, player)
 			return True
 		for enemy in self.enemies:
 			if(enemy.position == (new_y, new_x)):
-				if(entity is self.player):
+				if(entity is player):
 					#TODO: Add attack code here.
 					self.attack(entity, enemy)
 					return True
@@ -431,21 +437,28 @@ class Level:
 		result = self._move_sub(entity, new_y, new_x)
 		if(result and entity.location not in self.locations_to_update):
 			self.locations_to_update.append(entity.location)
-		if(result and entity is self.player):
+		if(result and entity is player):
 			for item in self.items:
 				if(entity.position == item.position):
 					global message
-					message = f"You see a {item} on the ground."
+					message = f"You see a {item} on the ground. "
+			if(entity.position == self.upstairs):
+				message += "You see a staircase going up here. "
+			elif(entity.position == self.downstairs):
+				message += "You see a staircase going down here. "
 		return result
 	def pickup(self, entity):
 		global message
 		for item in self.items:
 			if(item.position == entity.position):
-				entity.inventory.append((item.item, item.amount))
+				if(item.amount == 1):
+					entity.inventory.append(item.item)
+				else:
+					entity.inventory.append((item.item, item.amount))
 				self.items.remove(item)
-				message = f"Picked up a {item}."
+				message = f"Picked up a {item}. "
 				return True
-		message = "There's nothing here."
+		message = "There's nothing here. "
 		return False
 	def attack(self, entity1, entity2):
 		global message
@@ -454,10 +467,10 @@ class Level:
 			message += f"{entity1.name} hit {entity2.name} for {damage} damage! "
 			entity2.health -= damage
 			if(entity2.health <= 0):
-				if(entity1 is self.player):
+				if(entity1 is player):
 					entity1.exp+=entity2.exp
-					message = f"{entity1.name} slew {entity2.name}."
-				elif(entity2 is self.player):
+					message = f"{entity1.name} slew {entity2.name}. "
+				elif(entity2 is player):
 					#Easy way to implement death for now.
 					raise Exception("You died!")
 				self.enemies.remove(entity2)
@@ -466,14 +479,18 @@ class Level:
 	def draw_update(self, window):
 		for location in self.locations_to_update:
 			location.draw(window)
+			if(self.upstairs_room is location):
+				window.addch(*self.upstairs, "<")
+			if(self.downstairs_room is location):
+				window.addch(*self.downstairs, ">")
 			for item in self.items:
 				if item.location is location:
 					item.draw(window)
 			for enemy in self.enemies:
 				if enemy.location is location:
 					enemy.draw(window)
-		self.player.draw(window)
-		self.locations_to_update = [self.player.location]
+		player.draw(window)
+		self.locations_to_update = [player.location]
 	def regen_hp(self, entity):
 		if entity.lvl <= 7:
 			if(turn % (21 - (entity.lvl * 2)) == 0):
@@ -483,45 +500,52 @@ class Level:
 	def tick(self):
 		global turn
 		for enemy in self.enemies:
-			target_location = enemy.ai_move_to(self.player)
+			target_location = enemy.ai_move_to()
 			if(target_location is not None and target_location != enemy.position):
 				result = self.move(enemy, *target_location)
-
-		self.regen_hp(self.player)
+		self.regen_hp(player)
 		turn+=1
 	def draw(self, window):
 		for room in self.rooms:
 			room.draw(window)
 		for hallway in self.hallways:
 			hallway.draw(window)
+		if(self.upstairs is not None):
+			window.addch(*self.upstairs, "<")
+		if(self.downstairs is not None):
+			window.addch(*self.downstairs, ">")
 		for item in self.items:
 			item.draw(window)
 		for enemy in self.enemies:
 			enemy.draw(window)
-		self.player.draw(window)
+		player.draw(window)
 
-def generate_rooms():
+def generate_rooms(initial_room=None):
 	rooms = []
+	if(initial_room is not None):
+		rooms.append(initial_room)
 	num_rooms = randint(MIN_ROOMS, MAX_ROOMS)
 	current_iter = 0
 	while len(rooms) < num_rooms:
 		for _ in range(len(rooms), num_rooms):
 			width = randint(MIN_ROOM_WIDTH, MAX_ROOM_WIDTH)
 			height = randint(MIN_ROOM_HEIGHT, MAX_ROOM_HEIGHT)
-			rooms.append(Room(randint(0, LEVEL_HEIGHT-height-1), randint(0, LEVEL_WIDTH-width-1), height, width))
+			rooms.append(Room(randint(0, FLOOR_HEIGHT-height-1), randint(0, FLOOR_WIDTH-width-1), height, width))
 		#Remove overlap
 		original_rooms = rooms[:]
 		for room1 in original_rooms:
 			for room2 in original_rooms:
 				if room1 is not room2 and room1 in rooms and room2 in rooms:
 					if not (room1.y > room2.yheight + 1 or room2.y > room1.yheight + 1 or room1.x > room2.xwidth + 1 or room2.x > room1.xwidth + 1):
-						if(randint(0,1) == 0):
+						if(room2 is initial_room or (room1 is not initial_room and randint(0,1) == 0)):
 							rooms.remove(room1)
 						else:
 							rooms.remove(room2)
 		current_iter+=1
 		if current_iter > 100:
 			rooms = []
+			if(initial_room is not None):
+				rooms.append(initial_room)
 			current_iter = 0
 	return rooms
 
@@ -582,23 +606,21 @@ def generate_items(rooms):
 	num_items = randint(MIN_THINGS, MAX_THINGS)
 	while(len(item_locations) < num_items):
 		roomnum = randint(0, len(rooms)-1)
-		item_locations.add((randint(rooms[roomnum].y+1, rooms[roomnum].yheight-1), randint(rooms[roomnum].x+1, rooms[roomnum].xwidth-1), roomnum))
+		item_locations.add((*rooms[roomnum].randposition(), roomnum))
 	return [rand_drop(y,x,rooms[roomnum]) for y,x,roomnum in list(item_locations)]
 
-def generate_enemies(rooms, hallways, floor, player):
+def generate_enemies(rooms, hallways, floor):
 	num_enemies = randint(MIN_ENEMIES, MAX_ENEMIES)
 	valid_enemy_types = list(map(lambda x: x[1:], filter(lambda x: floor in x[0], enemy_types)))
 	enemy_rooms = []
 	enemy_coordinates = []
 	for _ in range(num_enemies):
 		room = choice(rooms)
-		x = randint(room.x+1, room.xwidth-1)
-		y = randint(room.y+1, room.yheight-1)
-		while((y,x) in enemy_coordinates or (y,x) == player.position):
+		position = room.randposition()
+		while(position in enemy_coordinates or position == player.position):
 			room = choice(rooms)
-			x = randint(room.x+1, room.xwidth-1)
-			y = randint(room.y+1, room.yheight-1)
-		enemy_coordinates.append((y,x))
+			position = room.randposition()
+		enemy_coordinates.append(position)
 		enemy_rooms.append(room)
 	respective_enemy_types = choices(valid_enemy_types, k=num_enemies)
 	enemies = []
@@ -606,16 +628,26 @@ def generate_enemies(rooms, hallways, floor, player):
 		enemies.append(Enemy(*enemy_coordinates[i], enemy_rooms[i], *respective_enemy_types[i]))
 	return enemies
 
-def generate_level(floor, player=None):
-	rooms = generate_rooms()
+def generate_floor(floor_number):
+	global player
+	if player is None:
+		initial_room = None
+	else:
+		initial_room = Room(player.location.y, player.location.x, player.location.height, player.location.width)
+	rooms = generate_rooms(initial_room)
 	while((hallways := generate_hallways(rooms)) is None):
-		rooms = generate_rooms()
+		rooms = generate_rooms(initial_room)
 	if(player is None):
 		start_room = rooms[0]
-		player = Player(randint(start_room.y+1, start_room.yheight-1), randint(start_room.x+1, start_room.xwidth-1), start_room)
+		player = Player(*start_room.randposition(), start_room)
 	items = generate_items(rooms)
-	enemies = generate_enemies(rooms, hallways, floor, player)
-	return Level(rooms, hallways, player, enemies, items)
+	enemies = generate_enemies(rooms, hallways, floor_number)
+	upstairs_room = initial_room if floor_number > 0 else None
+	upstairs = player.position if floor_number > 0 else None
+	downstairs_room = choice(rooms)
+	while((downstairs:=downstairs_room.randposition())==upstairs or any(map(lambda x: x.position == downstairs, items)) or any(map(lambda x: x.position == downstairs, enemies))):
+		pass
+	return Floor(rooms, hallways, upstairs, upstairs_room, downstairs, downstairs_room, enemies, items)
 
 key_directions = {curses.KEY_UP: (-1, 0),
 				  curses.KEY_DOWN: (1, 0),
@@ -635,36 +667,36 @@ key_directions = {curses.KEY_UP: (-1, 0),
 				  108: (0, 1) #l
 				  }
 
-def noutrefresh_pad(pad, player, level):
-	if (level.max_y - level.min_y) < curses.LINES-1:
-		offset_y = (curses.LINES-level.max_y+level.min_y)//2
-		new_y = level.min_y
+def noutrefresh_pad(pad, floor):
+	if (floor.max_y - floor.min_y) < curses.LINES-1:
+		offset_y = (curses.LINES-floor.max_y+floor.min_y)//2
+		new_y = floor.min_y
 	else:
 		offset_y = 1
-		if level.max_y - player.y < ((curses.LINES-2)//2):
-			new_y = level.max_y - curses.LINES + 3
+		if floor.max_y - player.y < ((curses.LINES-2)//2):
+			new_y = floor.max_y - curses.LINES + 3
 		else:
 			new_y = player.y - ((curses.LINES-2)//2)
-			if new_y < level.min_y:
-				new_y = level.min_y
-	if (level.max_x - level.min_x) < curses.COLS:
-		offset_x = (curses.COLS-level.max_x+level.min_x)//2
-		new_x = level.min_x
+			if new_y < floor.min_y:
+				new_y = floor.min_y
+	if (floor.max_x - floor.min_x) < curses.COLS:
+		offset_x = (curses.COLS-floor.max_x+floor.min_x)//2
+		new_x = floor.min_x
 	else:
 		offset_x = 0
-		if level.max_x - player.x  < ((curses.COLS-1)//2):
-			new_x = level.max_x - curses.COLS + 2
+		if floor.max_x - player.x  < ((curses.COLS-1)//2):
+			new_x = floor.max_x - curses.COLS + 2
 		else:
 			new_x = player.x-((curses.COLS-1)//2)
-			if new_x < level.min_x:
-				new_x = level.min_x
+			if new_x < floor.min_x:
+				new_x = floor.min_x
 	pad.noutrefresh(new_y, new_x, offset_y, offset_x, curses.LINES-2, curses.COLS-1)
 
-def refresh_pad(pad, player, level):
-	noutrefresh_pad(pad, player, level)
+def refresh_pad(pad, floor):
+	noutrefresh_pad(pad, floor)
 	curses.doupdate()
 
-def draw_statusbar(window, player):
+def draw_statusbar(window):
 	status = player.status()
 	if(len(status) >= curses.COLS-1):
 		status = status[:(curses.COLS-2)]
@@ -697,7 +729,7 @@ def draw_inv_menu(window, inventory, selection):
 		else:
 			window.addnstr(i, 0, str(inventory[invi]), cols)
 
-def inv_menu(window, player):
+def inv_menu(window):
 	key = None
 	window.erase()
 	invwindow = window.subwin(curses.LINES-1, curses.COLS-3, 1, 0)
@@ -719,35 +751,57 @@ def inv_menu(window, player):
 		invwindow.refresh()
 	return selection
 
-def drop_item(level, player, selection):
+def drop_item(floor, selection):
 	global message
-	if(any(filter(lambda item: item.position == player.position, level.items))):
-		message = "There's an item in the way!"
+	if(any(filter(lambda item: item.position == player.position, floor.items))):
+		message = "There's an item in the way! "
 	else:
-		message = f"Dropped a {player.inventory[selection]}"
-		level.items.append(GroundItem(player.y, player.x, player.location, *player.inventory[selection]))
+		message = f"Dropped a {player.inventory[selection]}. "
+		floor.items.append(GroundItem(player.y, player.x, player.location, *(player.inventory[selection] if isinstance(player.inventory[selection], tuple) else (player.inventory[selection], 1))))
 		del player.inventory[selection]
 
-def action_select(level, player, selection):
+def action_select(floor, selection):
 	pass
 
+def wear_item(floor, selection):
+	global message
+	if(isinstance(player.inventory[selection], Armor)):
+		if(player.eqarmor is not None):
+			player.inventory.append(player.eqarmor)
+		player.eqarmor = player.inventory[selection]
+		del player.inventory[selection]
+	else:
+		message += f"Cannot wear a {(player.inventory[selection][0].name if isinstance(player.inventory[selection], tuple) else player.inventory[selection].name)}. "
+
+def wield_item(floor, selection):
+	global message
+	if(isinstance(player.inventory[selection], Weapon)):
+		if(player.eqweapon is not None):
+			player.inventory.append(player.eqweapon)
+		player.eqweapon = player.inventory[selection]
+		del player.inventory[selection]
+	else:
+		message += f"Cannot wield a {(player.inventory[selection][0].name if isinstance(player.inventory[selection], tuple) else player.inventory[selection].name)}. "
+
 inventory_fns = {ord("i"): action_select,
-				 ord("d"): drop_item}
+				 ord("d"): drop_item,
+				 ord("W"): wear_item,
+				 ord("w"): wield_item}
 
 def main(scrwindow):
 	curses.curs_set(0)
 	scrwindow.clear()
 	global message
-	gamewindow = curses.newpad(LEVEL_HEIGHT, LEVEL_WIDTH)
+	gamewindow = curses.newpad(FLOOR_HEIGHT, FLOOR_WIDTH)
 	statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
 	messagebar = scrwindow.subwin(1, curses.COLS, 0, 0)
-	level = generate_level(1)
-	player = level.player
-	level.draw(gamewindow)
+	floor = generate_floor(0)
+	floors.append(floor)
+	floor.draw(gamewindow)
 	scrwindow.noutrefresh()
-	draw_statusbar(statusbar, player)
+	draw_statusbar(statusbar)
 	draw_messagebar(messagebar)
-	refresh_pad(gamewindow, player, level)
+	refresh_pad(gamewindow, floor)
 	def refresh_all():
 		curses.update_lines_cols()
 		statusbar.resize(1, curses.COLS)
@@ -756,15 +810,52 @@ def main(scrwindow):
 		gamewindow.erase()
 		scrwindow.erase()
 		scrwindow.noutrefresh()
-		draw_statusbar(statusbar, player)
+		draw_statusbar(statusbar)
 		draw_messagebar(messagebar)
-		level.draw(gamewindow)
-		refresh_pad(gamewindow, player, level)
+		floors[player.floor].draw(gamewindow)
+		refresh_pad(gamewindow, floors[player.floor])
 	while True:
 		do_update = False
 		key = scrwindow.getch()
 		if key == curses.KEY_RESIZE:
 			refresh_all()
+		elif key == ord("Q"):
+			message = "Are you sure you want to quit? (y/n)"
+			draw_messagebar(messagebar)
+			curses.doupdate()
+			message = ""
+			while((key:=scrwindow.getch()) != ord("n") and key != ord("N")):
+				if(key == ord("y") or key == ord("Y")):
+					return
+			draw_messagebar(messagebar)
+			curses.doupdate()
+		elif key == ord(">"):
+			if(floors[player.floor].downstairs == player.position):
+				player.floor+=1
+				if(len(floors) == player.floor):
+					floors.append(generate_floor(player.floor))
+				floor = floors[player.floor]
+				player.location = floors[player.floor].upstairs_room
+				player.y,player.x = floors[player.floor].upstairs
+				refresh_all()
+			else:
+				message = "There aren't any stairs going down here!"
+				draw_messagebar(messagebar)
+				curses.doupdate()
+				message = ""
+		elif key == ord("<"):
+			if(floors[player.floor].upstairs == player.position):
+				assert player.floor != 0, "Somehow able to go upstairs on top floor, unexpected error!"
+				player.floor-=1
+				floor = floors[player.floor]
+				player.location = floors[player.floor].downstairs_room
+				player.y,player.x = floors[player.floor].downstairs
+				refresh_all()
+			else:
+				message = "There aren't any stairs going up here!"
+				draw_messagebar(messagebar)
+				curses.doupdate()
+				message = ""
 		elif key in inventory_fns:
 			if(len(player.inventory)==0):
 				message = "Your inventory is empty!"
@@ -772,24 +863,25 @@ def main(scrwindow):
 				curses.doupdate()
 				message = ""
 			else:
-				selection = inv_menu(scrwindow, player)
+				selection = inv_menu(scrwindow)
 				if(selection is not None):
-					inventory_fns[key](level, player, selection)
+					inventory_fns[key](floor, selection)
 				refresh_all()
+				message = ""
 		elif key != -1:
 			if key in key_directions:
-				do_update = level.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
+				do_update = floor.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
 			elif key == ord("."):
 				do_update = True
 			elif key == ord("g"):
-				do_update = level.pickup(player)
+				do_update = floor.pickup(player)
 			if do_update:
-				level.tick()
-				level.draw_update(gamewindow)
-				draw_statusbar(statusbar, player)
+				floors[player.floor].tick()
+				floors[player.floor].draw_update(gamewindow)
+				draw_statusbar(statusbar)
 				draw_messagebar(messagebar)
 				message = ""
-				refresh_pad(gamewindow, player, level)
+				refresh_pad(gamewindow, floor)
 			else:
 				draw_messagebar(messagebar)
 				curses.doupdate()

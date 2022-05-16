@@ -12,10 +12,10 @@ MIN_ROOM_WIDTH = 5
 MAX_ROOM_WIDTH = 20
 MIN_ROOM_HEIGHT = 5
 MAX_ROOM_HEIGHT = 10
-MIN_ENEMIES = 3
-MAX_ENEMIES = 9
-MIN_THINGS = 3
-MAX_THINGS = 9
+MIN_ENEMIES = 1
+MAX_ENEMIES = 4
+MIN_THINGS = 0
+MAX_THINGS = 5
 message = ""
 turn = 0
 player = None
@@ -204,8 +204,11 @@ class Weapon:
 		self.name, self.base_dmg,  self.iscursed, self.hit_mod, self.dmg_mod,= (name, base_dmg, iscursed, hit_mod, dmg_mod)
 	def __repr__(self):
 		return f"{'Cursed ' if self.iscursed else ''}{self.name} {'+' if self.hit_mod >= 0 else ''}{self.hit_mod}{'+' if self.dmg_mod >= 0 else ''}{self.dmg_mod}"
-	def roll_damage(self):
-		return roll(*self.base_dmg)+self.dmg_mod
+	def roll_attacks(self, attacker, target):
+		for num,sides in zip(self.base_dmg[::2], self.base_dmg[1::2]):
+			if(attack_roll(attacker, target)):
+				return roll(num,sides) + self.dmg_mod
+		return None
 
 class Armor:
 	def __init__(self, name, armor, iscursed=False):
@@ -257,6 +260,11 @@ rand_item_table = [rand_weapon, rand_armor]
 def rand_drop(y, x, location):
 	return GroundItem(y, x, location, *(choice(rand_item_table)()))
 
+def attack_roll(attacker, defender):
+	atk_roll = roll(1, 20) + 1 + attacker.hit_mod()
+	def_val = 20 - attacker.lvl - defender.ac
+	return atk_roll >= def_val
+
 class Entity:
 	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, maxhealth, base_dmg):
 		self.y, self.x, self.location, self.name, self.symbol, self.lvl, self.exp, self.armor, self.base_dmg = (y, x, start_room, name, symbol, lvl, exp, armor, base_dmg)
@@ -279,14 +287,27 @@ class Entity:
 	@property
 	def ac(self):
 		return 11 - self.armor
-	def roll_damage(self):
-		return roll(*self.base_dmg)
+	def roll_attacks(self, target):
+		for num,sides in zip(self.base_dmg[::2], self.base_dmg[1::2]):
+			if(attack_roll(self, target)):
+				return roll(num,sides)
+		return None
 	def hit_mod(self):
 		return 0
 
 class Enemy(Entity):
-	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, base_dmg):
+	def __init__(self, y, x, start_room, name, symbol, lvl, exp, armor, base_dmg, carry):
 		super().__init__(y, x, start_room, name, symbol, lvl, exp, armor, (lvl, 8), base_dmg)
+		if(self.lvl == 1):
+			expmod = (self.maxhealth//8)
+		else:
+			expmod = (self.maxhealth//6)
+		if(self.lvl > 9):
+			expmod *= 20
+		elif(self.lvl > 6):
+			expmod *= 4
+		self.exp += expmod
+		self.carry = carry
 	def ai_move_to(self):
 			#Don't move if player isn't in the same room
 			if(player.location is self.location):
@@ -327,9 +348,12 @@ class Player(Entity):
 		return self._exp
 	@exp.setter
 	def exp(self, value):
-		if(value >= self.next_exp):
+		while(value >= self.next_exp):
 			self.lvl+=1
-			self.next_exp*=2
+			hpup = roll(1, 10)
+			self.maxhealth += hpup
+			self.health += hpup
+			self.next_exp *= 2
 		self._exp = value
 	@property
 	def armor(self):
@@ -339,23 +363,48 @@ class Player(Entity):
 	@armor.setter
 	def armor(self, value):
 		self._armor = value
-	def roll_damage(self):
+	def roll_attacks(self, target):
 		sdmod = strength_dmod_table[self.strength] if self.strength < len(strength_dmod_table) else strength_dmod_table[-1]
 		if(self.eqweapon is None):
-			return super().roll_damage() + sdmod
-		return self.eqweapon.roll_damage() +sdmod
+			damage = super().roll_attacks(target)
+		else:
+			damage = self.eqweapon.roll_attacks(self, target)
+		if(damage is not None):
+			damage += sdmod
+		return damage
 	def hit_mod(self):
 		shmod = strength_hmod_table[self.strength] if self.strength < len(strength_hmod_table) else strength_hmod_table[-1]
 		if(self.eqweapon is None):
 			return sdmod
 		return self.eqweapon.hit_mod + shmod
 
-def attack_roll(attacker, defender):
-	atk_roll = roll(1, 20) + 1 + attacker.hit_mod()
-	def_val = 20 - attacker.lvl - defender.ac
-	return atk_roll >= def_val
-
-enemy_types = [(range(0, 8), "Bat", "B", 1, 1, 2, (1,2))]
+			  #Floor Range,Name,Symbol,level,experience,armor,base damage, % item drop chance
+enemy_types = [(range(0, 8), "Bat", "B", 1, 1, 8, (1,2), 0),
+			   (range(0, 7), "Emu", "E", 1, 2, 4, (1,2), 0),
+			   (range(0, 9), "Hobgoblin", "H", 1, 3, 6, (1,8), 0),
+			   (range(0, 10), "Ice Monster", "I", 1, 5, 2, (0,0), 0),
+			   (range(0, 6), "Kestral", "K", 1, 1, 4, (1,4), 0),
+			   (range(0, 11), "Snake", "S", 1, 2, 6, (1,3), 0),
+			   (range(2, 12), "Orc", "O", 1, 5, 5, (1,8), 15),
+			   (range(2, 14), "Zombie", "Z", 2, 6, 3, (1,8), 0),
+			   (range(3, 13), "Rattlesnake", "R", 2, 9, 8, (1,6), 0),
+			   (range(5, 15), "Leprechaun", "L", 3, 10, 3, (1,1), 0),
+			   (range(6, 16), "Centaur", "C", 4, 17, 7, (1,2,1,5,1,5), 15),
+			   (range(7, 17), "Aquator", "A", 5, 20, 9, (0,0,0,0), 0),
+			   (range(8, 18), "Quagga", "Q", 3, 15, 8, (1,5,1,5), 0),
+			   (range(9, 19), "Nymph", "N", 3, 37, 2, (0,0), 100),
+			   (range(10, 20), "Yeti", "Y", 4, 50, 5, (1,6,1,6), 30),
+			   (range(11, 21), "Troll", "T", 6, 120, 7, (1,8,1,8,2,6), 50),
+			   (range(12, 22), "Wraith", "W", 5, 55, 7, (1,6), 0),
+			   #(range(13, 23), "Flytrap", "F", 8, 80, 8, (0,0), 0), #will add later when functionality is better known
+			   (range(14, 24), "Phantom", "P", 8, 120, 8, (4,4), 0),
+			   (range(15, 25), "Black Unicorn", "U", 7, 190, 13, (1,9,1,9,2,9), 0),
+			   (range(16, 26), "Griffin", "G", 13, 2000, 9, (4,3,3,5), 20),
+			   (range(17, 1000), "Medusa", "M", 8, 200, 9, (3,4,3,4,2,5), 40),
+			   (range(18, 1000), "Xeroc", "X", 7, 100, 4, (4,4), 30),
+			   (range(19, 1000), "Vampire", "V", 8, 350, 10, (1,10), 20),
+			   (range(20, 1000), "Jabberwock", "J", 15, 3000, 5, (2,12,2,4), 70),
+			   (range(21, 1000), "Dragon", "D", 10, 5000, 12, (1,8,1,8,3,10), 100)]
 
 def get_location(locations, y, x):
 	for location in locations:
@@ -462,8 +511,8 @@ class Floor:
 		return False
 	def attack(self, entity1, entity2):
 		global message
-		if(attack_roll(entity1, entity2)):
-			damage = entity1.roll_damage()
+		damage = entity1.roll_attacks(entity2)
+		if(damage is not None):
 			message += f"{entity1.name} hit {entity2.name} for {damage} damage! "
 			entity2.health -= damage
 			if(entity2.health <= 0):
@@ -707,12 +756,9 @@ def draw_statusbar(window):
 	window.noutrefresh()
 
 def draw_messagebar(window):
-	# if(len(drawmessage) >= curses.COLS-1):
-	# 	drawmessage = drawmessage[:(curses.COLS-2)]
 	window.erase()
 	window.addnstr(0, 1, message, curses.COLS-1)
 	window.noutrefresh()
-	# message = ""
 
 def draw_inv_menu(window, inventory, selection):
 	lines, cols = window.getmaxyx()

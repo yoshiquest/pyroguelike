@@ -519,6 +519,8 @@ class Floor:
 				if(entity1 is player):
 					entity1.exp+=entity2.exp
 					message = f"{entity1.name} slew {entity2.name}. "
+					if(randint(0,99) < entity2.carry and (not any(map(lambda i: (entity2.y, entity2.x) == i.position, self.items)))):
+						self.items.append(rand_drop(entity2.y, entity2.x, entity2.location))
 				elif(entity2 is player):
 					#Easy way to implement death for now.
 					raise Exception("You died!")
@@ -687,6 +689,10 @@ def generate_floor(floor_number):
 		initial_room = Room(player.location.y, player.location.x, player.location.height, player.location.width)
 	rooms = generate_rooms(initial_room)
 	while((hallways := generate_hallways(rooms)) is None):
+		if player is None:
+			initial_room = None
+		else:
+			initial_room = Room(player.location.y, player.location.x, player.location.height, player.location.width)
 		rooms = generate_rooms(initial_room)
 	if(player is None):
 		start_room = rooms[0]

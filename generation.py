@@ -1,12 +1,12 @@
 from random import choice, choices, randint
 
-from globals import MIN_ROOMS, MAX_ROOMS, MIN_ROOM_WIDTH, \
+from constants import MIN_ROOMS, MAX_ROOMS, MIN_ROOM_WIDTH, \
  MIN_ROOM_HEIGHT, MAX_ROOM_WIDTH, MAX_ROOM_HEIGHT, FLOOR_HEIGHT, \
  FLOOR_WIDTH, MIN_THINGS, MAX_THINGS, MIN_ENEMIES, MAX_ENEMIES
-import globals
 from items import rand_drop
 from floors import Room, Hallway, Floor
-from entities import Player, enemy_types, Enemy
+from entities import enemy_types, Enemy
+from misc import Log
 
 def generate_rooms(initial_room=None):
 	rooms = []
@@ -107,7 +107,7 @@ def generate_enemies(rooms, hallways, floor):
 	for _ in range(num_enemies):
 		room = choice(rooms)
 		position = room.randposition()
-		while(position in enemy_coordinates or position == globals.player.position):
+		while(position in enemy_coordinates):
 			room = choice(rooms)
 			position = room.randposition()
 		enemy_coordinates.append(position)
@@ -119,25 +119,17 @@ def generate_enemies(rooms, hallways, floor):
 	return enemies
 
 def generate_floor(floor_number):
-	if globals.player is None:
-		initial_room = None
-	else:
-		initial_room = Room(globals.player.location.y, globals.player.location.x, globals.player.location.height, globals.player.location.width)
-	rooms = generate_rooms(initial_room)
-	while((hallways := generate_hallways(rooms)) is None):
-		if globals.player is None:
-			initial_room = None
-		else:
-			initial_room = Room(globals.player.location.y, globals.player.location.x, globals.player.location.height, globals.player.location.width)
+	base_room = Floor.floors[floor_number-1].downstairs_room if floor_number > 0 else None
+	hallways = None
+	while(hallways is None):
+		initial_room = Room(base_room.y, base_room.x, base_room.height, base_room.width) if base_room is not None else None
 		rooms = generate_rooms(initial_room)
-	if(globals.player is None):
-		start_room = rooms[0]
-		globals.player = Player(*start_room.randposition(), start_room)
+		hallways = generate_hallways(rooms)
 	items = generate_items(rooms)
 	enemies = generate_enemies(rooms, hallways, floor_number)
-	upstairs_room = initial_room if floor_number > 0 else None
-	upstairs = globals.player.position if floor_number > 0 else None
+	upstairs_room = initial_room
+	upstairs = Floor.floors[floor_number-1].downstairs if floor_number > 0 else None
 	downstairs_room = choice(rooms)
 	while((downstairs:=downstairs_room.randposition())==upstairs or any(map(lambda x: x.position == downstairs, items)) or any(map(lambda x: x.position == downstairs, enemies))):
-		pass
+		downstairs_room = choice(rooms)
 	return Floor(rooms, hallways, upstairs, upstairs_room, downstairs, downstairs_room, enemies, items)

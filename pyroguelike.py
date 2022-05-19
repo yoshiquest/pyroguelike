@@ -1,39 +1,59 @@
 import curses
-from globals import FLOOR_HEIGHT, FLOOR_WIDTH, key_directions
-import globals
+from constants import FLOOR_HEIGHT, FLOOR_WIDTH
 from generation import generate_floor
 from screens import *
 from items import GroundItem, Armor, Weapon
+from floors import Floor
+from entities import Player
+from misc import Log
+from random import choice
 
-def drop_item(floor, selection):
-	if(any(filter(lambda item: item.position == globals.player.position, floor.items))):
-		globals.message = "There's an item in the way! "
+def drop_item(player, floor, selection):
+	if(any(filter(lambda item: item.position == player.position, floor.items))):
+		Log.message = "There's an item in the way! "
 	else:
-		globals.message = f"Dropped a {globals.player.inventory[selection]}. "
-		floor.items.append(GroundItem(globals.player.y, globals.player.x, globals.player.location, *(globals.player.inventory[selection] if isinstance(globals.player.inventory[selection], tuple) else (globals.player.inventory[selection], 1))))
-		del globals.player.inventory[selection]
+		Log.message = f"Dropped a {player.inventory[selection]}. "
+		floor.items.append(GroundItem(player.y, player.x, player.location, *(player.inventory[selection] if isinstance(player.inventory[selection], tuple) else (player.inventory[selection], 1))))
+		del player.inventory[selection]
 
-def action_select(floor, selection):
+def action_select(player, floor, selection):
 	pass
 
-def wear_item(floor, selection):
-	if(isinstance(globals.player.inventory[selection], Armor)):
-		if(globals.player.eqarmor is not None):
-			globals.player.inventory.append(globals.player.eqarmor)
-		globals.player.eqarmor = globals.player.inventory[selection]
-		del globals.player.inventory[selection]
+def wear_item(player, floor, selection):
+	if(isinstance(player.inventory[selection], Armor)):
+		if(player.eqarmor is not None):
+			player.inventory.append(player.eqarmor)
+		player.eqarmor = player.inventory[selection]
+		del player.inventory[selection]
 	else:
-		globals.message += f"Cannot wear a {(globals.player.inventory[selection][0].name if isinstance(globals.player.inventory[selection], tuple) else globals.player.inventory[selection].name)}. "
+		Log.message += f"Cannot wear a {(player.inventory[selection][0].name if isinstance(player.inventory[selection], tuple) else player.inventory[selection].name)}. "
 
-def wield_item(floor, selection):
-	global message
-	if(isinstance(globals.player.inventory[selection], Weapon)):
-		if(globals.player.eqweapon is not None):
-			globals.player.inventory.append(globals.player.eqweapon)
-		globals.player.eqweapon = globals.player.inventory[selection]
-		del globals.player.inventory[selection]
+def wield_item(player, floor, selection):
+	if(isinstance(player.inventory[selection], Weapon)):
+		if(player.eqweapon is not None):
+			player.inventory.append(player.eqweapon)
+		player.eqweapon = player.inventory[selection]
+		del player.inventory[selection]
 	else:
-		globals.message += f"Cannot wield a {(globals.player.inventory[selection][0].name if isinstance(globals.player.inventory[selection], tuple) else globals.player.inventory[selection].name)}. "
+		Log.message += f"Cannot wield a {(player.inventory[selection][0].name if isinstance(player.inventory[selection], tuple) else player.inventory[selection].name)}. "
+
+key_directions = {curses.KEY_UP: (-1, 0),
+				  curses.KEY_DOWN: (1, 0),
+				  curses.KEY_LEFT: (0, -1),
+				  curses.KEY_RIGHT: (0, 1),
+				  # curses.KEY_SR: (-1, 1), #Shift Up
+				  # curses.KEY_SF: (1, -1), #Shift Down
+				  # curses.KEY_SLEFT: (-1, -1),
+				  # curses.KEY_SRIGHT: (1, 1)
+				  121: (-1, -1), #y
+				  117: (-1, 1), #u
+				  98: (1, -1), #b
+				  110: (1, 1), #n
+				  104: (0, -1), #h
+				  106: (-1, 0), #j
+				  107: (1, 0), #k
+				  108: (0, 1) #l
+				  }
 
 inventory_fns = {ord("i"): action_select,
 				 ord("d"): drop_item,
@@ -45,101 +65,87 @@ def main(scrwindow):
 	scrwindow.clear()
 	gamewindow = curses.newpad(FLOOR_HEIGHT, FLOOR_WIDTH)
 	statusbar = scrwindow.subwin(1, curses.COLS, curses.LINES-1, 0)
-	messagebar = scrwindow.subwin(1, curses.COLS, 0, 0)
+	Log.window = scrwindow.subwin(1, curses.COLS, 0, 0)
 	floor = generate_floor(0)
-	globals.floors.append(floor)
+	player = None
+	while(player is None):
+		start_room = choice(floor.rooms)
+		position = start_room.randposition()
+		if (position!=floor.downstairs and not any(map(lambda x: x.position == position, floor.items)) and not any(map(lambda x: x.position == position, floor.enemies))):
+			player = Player(*position, start_room)
 	floor.draw(gamewindow)
 	scrwindow.noutrefresh()
 	draw_statusbar(statusbar)
-	draw_messagebar(messagebar)
+	Log.draw()
 	refresh_pad(gamewindow, floor)
 	def refresh_all():
 		curses.update_lines_cols()
 		statusbar.resize(1, curses.COLS)
 		statusbar.mvwin(curses.LINES-1, 0)
-		messagebar.resize(1, curses.COLS)
+		Log.window.resize(1, curses.COLS)
 		gamewindow.erase()
 		scrwindow.erase()
 		scrwindow.noutrefresh()
 		draw_statusbar(statusbar)
-		draw_messagebar(messagebar)
-		globals.floors[globals.player.floor].draw(gamewindow)
-		refresh_pad(gamewindow, globals.floors[globals.player.floor])
+		Log.draw()
+		floor.draw(gamewindow)
+		refresh_pad(gamewindow, floor)
 	while True:
 		do_update = False
 		key = scrwindow.getch()
 		if key == curses.KEY_RESIZE:
 			refresh_all()
 		elif key == ord("Q"):
-			globals.message = "Are you sure you want to quit? (y/n)"
-			draw_messagebar(messagebar)
-			curses.doupdate()
-			globals.message = ""
+			Log.lognow("Are you sure you want to quit? (y/n)")
 			while((key:=scrwindow.getch()) != ord("n") and key != ord("N")):
 				if(key == ord("y") or key == ord("Y")):
 					return
-			draw_messagebar(messagebar)
-			curses.doupdate()
+			Log.refresh()
 		elif key == ord(">"):
-			if(globals.floors[globals.player.floor].downstairs == globals.player.position):
-				globals.player.floor+=1
-				if(len(globals.floors) == globals.player.floor):
-					globals.floors.append(generate_floor(globals.player.floor))
-				floor = globals.floors[globals.player.floor]
-				globals.player.location = globals.floors[globals.player.floor].upstairs_room
-				globals.player.y,globals.player.x = globals.floors[globals.player.floor].upstairs
+			if(floor.downstairs == player.position):
+				player.floor+=1
+				while(len(Floor.floors) <= player.floor):
+					generate_floor(player.floor)
+				floor = Floor.floors[player.floor]
+				player.location = Floor.floors[player.floor].upstairs_room
+				player.y,player.x = Floor.floors[player.floor].upstairs
 				refresh_all()
 			else:
-				globals.message = "There aren't any stairs going down here!"
-				draw_messagebar(messagebar)
-				curses.doupdate()
-				globals.message = ""
+				Log.lognow("There aren't any stairs going down here!")
 		elif key == ord("<"):
-			if(globals.floors[globals.player.floor].upstairs == globals.player.position):
-				assert globals.player.floor != 0, "Somehow able to go upstairs on top floor, unexpected error!"
-				globals.player.floor-=1
-				floor = globals.floors[globals.player.floor]
-				globals.player.location = globals.floors[globals.player.floor].downstairs_room
-				globals.player.y,globals.player.x = globals.floors[globals.player.floor].downstairs
+			if(floor.upstairs == player.position):
+				assert player.floor != 0, "Somehow able to go upstairs on top floor, unexpected error!"
+				player.floor-=1
+				floor = Floor.floors[player.floor]
+				player.location = floor.downstairs_room
+				player.y,player.x = floor.downstairs
 				refresh_all()
 			else:
-				globals.message = "There aren't any stairs going up here!"
-				draw_messagebar(messagebar)
-				curses.doupdate()
-				globals.message = ""
+				Log.lognow("There aren't any stairs going up here!")
 		elif key in inventory_fns:
-			if(len(globals.player.inventory)==0):
-				globals.message = "Your inventory is empty!"
-				draw_messagebar(messagebar)
-				curses.doupdate()
-				globals.message = ""
+			if(len(player.inventory)==0):
+				Log.lognow("Your inventory is empty!")
 			else:
 				selection = inv_menu(scrwindow)
 				if(selection is not None):
-					inventory_fns[key](floor, selection)
+					inventory_fns[key](player, floor, selection)
 				refresh_all()
-				globals.message = ""
+				Log.clear()
 		elif key != -1:
 			if key in key_directions:
-				do_update = floor.move(globals.player, globals.player.y+key_directions[key][0], globals.player.x+key_directions[key][1])
+				do_update = floor.move(player, player.y+key_directions[key][0], player.x+key_directions[key][1])
 			elif key == ord("."):
 				do_update = True
 			elif key == ord("g"):
-				do_update = floor.pickup(globals.player)
+				do_update = floor.pickup(player)
 			if do_update:
-				globals.floors[globals.player.floor].tick()
-				globals.floors[globals.player.floor].draw_update(gamewindow)
+				floor.tick()
+				floor.draw_update(gamewindow)
 				draw_statusbar(statusbar)
-				draw_messagebar(messagebar)
-				globals.message = ""
+				Log.draw()
 				refresh_pad(gamewindow, floor)
+				Log.clear()
 			else:
-				draw_messagebar(messagebar)
-				curses.doupdate()
-				globals.message = ""
-		# message = str(key)
-		# draw_messagebar(messagebar)
-		# curses.doupdate()
-		# message = ""
+				Log.crefresh()
 
 curses.wrapper(main)

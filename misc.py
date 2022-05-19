@@ -1,4 +1,32 @@
 from random import randint
+import curses
+
+class Log:
+	message = ""
+	window = None
+	@classmethod
+	def clear(cls):
+		cls.message = ""
+	@classmethod
+	def draw(cls):
+		try:
+			cls.window.erase()
+			cls.window.addnstr(0, 1, cls.message, cls.window.getmaxyx()[1]-2)
+			cls.window.noutrefresh()
+		except curses.error as e:
+			raise Exception(f"{cls.window}, {cls.message}, {cls.window.getmaxyx()}")
+	@classmethod
+	def refresh(cls):
+		cls.draw()
+		curses.doupdate()
+	@classmethod
+	def crefresh(cls):
+		cls.refresh()
+		cls.message = ""
+	@classmethod
+	def lognow(cls, message):
+		cls.message = message
+		cls.crefresh()
 
 def saferange(a, b):
 	return range(b, a+1) if a > b else range(a, b+1)

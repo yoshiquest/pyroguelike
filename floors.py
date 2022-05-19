@@ -1,8 +1,8 @@
 import curses
 from random import randint
 
-from misc import saferange, swapxy, make_linefn
-import globals
+from misc import saferange, swapxy, make_linefn, Log
+from entities import Player
 
 class HallwaySegment:
 	def __init__(self, y1, x1, y2, x2):
@@ -150,6 +150,8 @@ class Room:
 			window.addch(door[0], door[1], "+")
 
 class Floor:
+	floors = []
+	turn = 0
 	def __init__(self, rooms, hallways, upstairs, upstairs_room, downstairs, downstairs_room, enemies=[], items=[]):
 		self.rooms = rooms
 		self.hallways = hallways
@@ -159,7 +161,8 @@ class Floor:
 		self.upstairs = upstairs
 		self.downstairs_room = downstairs_room
 		self.downstairs = downstairs
-		self.locations_to_update = [(globals.player.location if upstairs_room is None else upstairs_room)]
+		self.locations_to_update = self.rooms if upstairs is None else [upstairs_room]
+		Floor.floors.append(self)
 	@property
 	def min_x(self):
 		return min(self.rooms, key=lambda r: r.x).x
@@ -209,12 +212,12 @@ class Floor:
 		return False
 	def move(self, entity, new_y, new_x):
 		"Attempts to move entity to new_y, new_x. Returns True if time passed, False otherwise."
-		if(entity is not globals.player and (new_y, new_x) == globals.player.position):
-			self.attack(entity, globals.player)
+		if(entity is not Player.instance and (new_y, new_x) == Player.instance.position):
+			self.attack(entity, Player.instance)
 			return True
 		for enemy in self.enemies:
 			if(enemy.position == (new_y, new_x)):
-				if(entity is globals.player):
+				if(entity is Player.instance):
 					#TODO: Add attack code here.
 					self.attack(entity, enemy)
 					return True
@@ -223,14 +226,14 @@ class Floor:
 		result = self._move_sub(entity, new_y, new_x)
 		if(result and entity.location not in self.locations_to_update):
 			self.locations_to_update.append(entity.location)
-		if(result and entity is globals.player):
+		if(result and entity is Player.instance):
 			for item in self.items:
 				if(entity.position == item.position):
-					globals.message = f"You see a {item} on the ground. "
+					Log.message += f"You see a {item} on the ground. "
 			if(entity.position == self.upstairs):
-				globals.message += "You see a staircase going up here. "
+				Log.message += "You see a staircase going up here. "
 			elif(entity.position == self.downstairs):
-				globals.message += "You see a staircase going down here. "
+				Log.message += "You see a staircase going down here. "
 		return result
 	def pickup(self, entity):
 		for item in self.items:
@@ -240,27 +243,27 @@ class Floor:
 				else:
 					entity.inventory.append((item.item, item.amount))
 				self.items.remove(item)
-				globals.message = f"Picked up a {item}. "
+				Log.message += f"Picked up a {item}. "
 				return True
-		globals.message = "There's nothing here. "
+		Log.message += "There's nothing here. "
 		return False
 	def attack(self, entity1, entity2):
 		damage = entity1.roll_attacks(entity2)
 		if(damage is not None):
-			globals.message += f"{entity1.name} hit {entity2.name} for {damage} damage! "
+			Log.message += f"{entity1.name} hit {entity2.name} for {damage} damage! "
 			entity2.health -= damage
 			if(entity2.health <= 0):
-				if(entity1 is globals.player):
-					entity1.exp+=entity2.exp
-					globals.message = f"{entity1.name} slew {entity2.name}. "
+				if(entity1 is Player.instance):
+					entity1.exp += entity2.exp
+					Log.message += f"{entity1.name} slew {entity2.name}. "
 					if(randint(0,99) < entity2.carry and (not any(map(lambda i: (entity2.y, entity2.x) == i.position, self.items)))):
 						self.items.append(rand_drop(entity2.y, entity2.x, entity2.location))
-				elif(entity2 is globals.player):
+				elif(entity2 is Player.instance):
 					#Easy way to implement death for now.
 					raise Exception("You died!")
 				self.enemies.remove(entity2)
 		else:
-			globals.message += f"{entity1.name} missed {entity2.name}! "
+			Log.message += f"{entity1.name} missed {entity2.name}! "
 	def draw_update(self, window):
 		for location in self.locations_to_update:
 			location.draw(window)
@@ -274,22 +277,21 @@ class Floor:
 			for enemy in self.enemies:
 				if enemy.location is location:
 					enemy.draw(window)
-		globals.player.draw(window)
-		self.locations_to_update = [globals.player.location]
+		Player.instance.draw(window)
+		self.locations_to_update = [Player.instance.location]
 	def regen_hp(self, entity):
 		if entity.lvl <= 7:
-			if(globals.turn % (21 - (entity.lvl * 2)) == 0):
+			if(Floor.turn % (21 - (entity.lvl * 2)) == 0):
 				entity.health+=1
-		elif globals.turn % 3 == 0:
+		elif Floor.turn % 3 == 0:
 			entity.health+=randint(1, entity.lvl - 7)
 	def tick(self):
-		global turn
 		for enemy in self.enemies:
 			target_location = enemy.ai_move_to()
 			if(target_location is not None and target_location != enemy.position):
 				result = self.move(enemy, *target_location)
-		self.regen_hp(globals.player)
-		globals.turn+=1
+		self.regen_hp(Player.instance)
+		Floor.turn+=1
 	def draw(self, window):
 		for room in self.rooms:
 			room.draw(window)
@@ -303,4 +305,4 @@ class Floor:
 			item.draw(window)
 		for enemy in self.enemies:
 			enemy.draw(window)
-		globals.player.draw(window)
+		Player.instance.draw(window)

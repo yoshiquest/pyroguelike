@@ -1,6 +1,5 @@
 from items import Weapon, Armor, weapon_types, armor_types
-from globals import STARTING_WEAPON_TYPE, STARTING_WEAPON_MODS, STARTING_ARMOR_TYPE, PLAYER_NAME
-import globals
+from constants import STARTING_WEAPON_TYPE, STARTING_WEAPON_MODS, STARTING_ARMOR_TYPE, PLAYER_NAME
 from misc import roll, direction, attack_roll
 
 			  #Floor Range,Name,Symbol,level,experience,armor,base damage, % item drop chance
@@ -81,8 +80,9 @@ class Enemy(Entity):
 		self.carry = carry
 	def ai_move_to(self):
 			#Don't move if player isn't in the same room
-			if(globals.player.location is self.location):
-				new_y, new_x = (self.y + direction(globals.player.y, self.y), self.x + direction(globals.player.x, self.x))
+			player = Player.instance
+			if(player.location is self.location):
+				new_y, new_x = (self.y + direction(player.y, self.y), self.x + direction(player.x, self.x))
 				if(new_x == self.location.xwidth):
 					new_x = self.location.xwidth-1
 				elif(new_x == self.location.x):
@@ -95,6 +95,7 @@ class Enemy(Entity):
 			return None
 
 class Player(Entity):
+	instance = None
 	def __init__(self, y, x, start_room):
 		self.strength = 16
 		self.maxstrength = 16
@@ -104,6 +105,7 @@ class Player(Entity):
 		self.gold = 0
 		self.floor = 0
 		self.next_exp = 10
+		Player.instance = self
 		super().__init__(y, x, start_room, PLAYER_NAME, "@", 1, 0, 1, 12, (1,4))
 	def status(self):
 		return f"Floor: {self.floor+1} Gold: {self.gold} Hp: {self.health}({self.maxhealth}) Str: {self.strength}({self.maxstrength}) Arm: {self.armor} Level: {self.lvl} Exp: {self.exp}/{self.next_exp}"

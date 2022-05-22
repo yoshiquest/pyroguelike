@@ -1,4 +1,4 @@
-#Pyroguelike
+# Pyroguelike
 This is a simple roguelike I made both for fun and to experiment with Python's curses library.
 I used the original Rogue's source as a reference for a few things (such as enemy names/types, damage, and similar number stuff), but the code structure is my own.
 
